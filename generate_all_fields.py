@@ -47,6 +47,7 @@ PLANETS = {
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
                      8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
                      16.0, 17.0, 18.0, 19.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0],
+        'max_trace_r': 60,  # Extend further to capture full extent
         'custom_field': None,
         'moons': []
     },
@@ -62,6 +63,7 @@ PLANETS = {
                      8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
                      25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0,
                      65.0, 70.0, 75.0, 80.0],
+        'max_trace_r': 150,  # Extended to capture full extent
         'custom_field': get_jupiter_field,
         'moons': [
             {'name': 'Io', 'orbit_radius': 5.905, 'period_hours': 42.459, 'size': 0.051}
@@ -80,6 +82,7 @@ PLANETS = {
                      8.5, 9.0, 9.5, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
                      16.0, 17.0, 18.0, 19.0, 20.0, 22.0, 24.0, 26.0,
                      28.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0],
+        'max_trace_r': 90,  # Extended to capture full extent
         'custom_field': None,
         'moons': [
             {'name': 'Enceladus', 'orbit_radius': 3.948, 'period_hours': 32.885, 'size': 0.0084}
@@ -98,7 +101,7 @@ PLANETS = {
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
                      8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
                      22.0, 24.0, 26.0, 28.0, 30.0, 35.0, 40.0, 45.0, 50.0],
-        'max_trace_r': 200,  # Wide area to capture full field lines
+        'max_trace_r': 500,  # Extended to capture full field lines extending far from planet
         'custom_field': None,
         'moons': [
             {'name': 'Miranda', 'orbit_radius': 5.08, 'period_hours': 33.92, 'size': 0.0184},
@@ -117,11 +120,41 @@ PLANETS = {
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
                      8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
                      22.0, 24.0, 26.0, 28.0, 30.0, 35.0, 40.0, 45.0, 50.0],
-        'max_trace_r': 200,  # Wide area to capture full field lines
+        'max_trace_r': 500,  # Extended to capture full field lines extending far from planet
         'custom_field': None,
         'moons': []
     }
 }
+
+def rotate_to_magnetic_frame(pos, magnetic_tilt_deg, rotation_axis_idx=1):
+    """
+    Rotate position from rotation frame to magnetic frame.
+    magnetic_tilt_deg: angle between rotation and magnetic axes (degrees)
+    rotation_axis_idx: which axis is the rotation axis (0=x, 1=y, 2=z)
+    """
+    # For Uranus/Neptune, magnetic axis is tilted in the y-z plane
+    # rotation axis is z, so we rotate around x-axis (index 0)
+    tilt_rad = np.radians(magnetic_tilt_deg)
+    cos_t = np.cos(tilt_rad)
+    sin_t = np.sin(tilt_rad)
+    
+    x, y, z = pos
+    # Rotation around x-axis: y and z change
+    y_rot = y * cos_t - z * sin_t
+    z_rot = y * sin_t + z * cos_t
+    return np.array([x, y_rot, z_rot])
+
+def rotate_to_rotation_frame(pos, magnetic_tilt_deg):
+    """Rotate position from magnetic frame back to rotation frame."""
+    tilt_rad = np.radians(magnetic_tilt_deg)
+    cos_t = np.cos(tilt_rad)
+    sin_t = np.sin(tilt_rad)
+    
+    x, y, z = pos
+    # Inverse rotation around x-axis
+    y_rot = y * cos_t + z * sin_t
+    z_rot = -y * sin_t + z * cos_t
+    return np.array([x, y_rot, z_rot])
 
 def trace_field_line_bidirectional(start_pos, get_field_func, ds=0.02, max_steps=20000, max_r=150):
     """
@@ -205,6 +238,9 @@ def generate_field_lines_for_planet(planet_key):
     all_l_shells = []
     num_longitudes = 24  # Field lines per L-shell for visualization
     
+    # Get magnetic tilt if present (for Uranus/Neptune)
+    magnetic_tilt = config.get('magnetic_tilt', 0.0)
+    
     # Generate regular L-shells with 24 longitudes for visualization
     for L in l_shells:
         print(f"  L = {L}...", end=' ', flush=True)
@@ -212,13 +248,19 @@ def generate_field_lines_for_planet(planet_key):
         
         for i in range(num_longitudes):
             phi = 2 * np.pi * i / num_longitudes
-            # Start in equatorial plane at distance L
+            # Start in MAGNETIC equatorial plane at distance L
             start_x = L * np.cos(phi)
             start_y = L * np.sin(phi)
             start_z = 0.0
             
+            # If field has magnetic tilt, rotate from magnetic frame to rotation frame for display
+            if magnetic_tilt > 0:
+                start_pos = rotate_to_rotation_frame(np.array([start_x, start_y, start_z]), magnetic_tilt)
+            else:
+                start_pos = np.array([start_x, start_y, start_z])
+            
             points = trace_field_line_bidirectional(
-                [start_x, start_y, start_z],
+                start_pos.tolist(),
                 get_B,
                 ds=0.02 if L < 5 else 0.05,
                 max_steps=20000,
@@ -237,19 +279,17 @@ def generate_field_lines_for_planet(planet_key):
             'lines': lines
         })
     
-    # Generate moon flux tubes: 720 longitudes × multiple radial samples
+    # Generate moon flux tubes: 360 longitudes (1° steps) at exact orbital radius
+    # Moon orbits are nearly circular (e < 0.005), so we only need 1 radial sample
     moon_flux_tubes = []
     for moon in config.get('moons', []):
         moon_name = moon['name']
         orbit_r = moon['orbit_radius']
         
-        # Sample radial range around moon orbit (±0.1 Rp at 0.05 Rp resolution)
-        radial_tolerance = 0.1
-        radial_step = 0.05
-        radial_samples = np.arange(orbit_r - radial_tolerance, orbit_r + radial_tolerance + 0.001, radial_step)
-        radial_samples = [round(r, 3) for r in radial_samples if r > 1.0]  # Filter out values inside planet
+        # Just use the exact orbital radius - orbits are circular
+        radial_samples = [orbit_r]
         
-        print(f"  Moon {moon_name}: flux tubes at L = {radial_samples} (720 lons each)")
+        print(f"  Moon {moon_name}: flux tubes at L = {orbit_r} (360 lons)")
         
         flux_tube_data = {
             'moon_name': moon_name,
@@ -261,26 +301,39 @@ def generate_field_lines_for_planet(planet_key):
             print(f"    L = {L}...", end=' ', flush=True)
             lines = []
             
-            for i in range(720):  # 0.5 degree steps
-                phi = 2 * np.pi * i / 720
+            for i in range(360):  # 1 degree steps
+                phi = 2 * np.pi * i / 360
+                # Start in MAGNETIC equatorial plane at distance L
                 start_x = L * np.cos(phi)
                 start_y = L * np.sin(phi)
                 start_z = 0.0
                 
+                # If field has magnetic tilt, rotate from magnetic frame to rotation frame for display
+                if magnetic_tilt > 0:
+                    start_pos = rotate_to_rotation_frame(np.array([start_x, start_y, start_z]), magnetic_tilt)
+                else:
+                    start_pos = np.array([start_x, start_y, start_z])
+                
+                # Use smaller step size and more steps for better tracing
                 points = trace_field_line_bidirectional(
-                    [start_x, start_y, start_z],
+                    start_pos.tolist(),
                     get_B,
-                    ds=0.02 if L < 5 else 0.05,
-                    max_steps=20000,
-                    max_r=max_r
+                    ds=0.01,  # Smaller step for accuracy
+                    max_steps=100000,  # Many more steps to trace very far
+                    max_r=max_r * 3  # Triple the max radius to ensure we capture full extent
                 )
                 
                 if len(points) > 10:
                     threejs_points = [[p[0], p[2], p[1]] for p in points]
                     threejs_points = [[round(c, 3) for c in p] for p in threejs_points]
                     lines.append(threejs_points)
+                else:
+                    # If tracing failed, add empty placeholder to maintain indexing
+                    lines.append(None)
             
-            print(f"{len(lines)} lines")
+            # Count valid lines
+            valid_count = sum(1 for l in lines if l is not None)
+            print(f"{valid_count} valid lines")
             flux_tube_data['radial_samples'].append({
                 'L': L,
                 'lines': lines
@@ -319,8 +372,8 @@ def main():
     """Generate field lines for all planets."""
     os.chdir('/Users/jamesodonoghue/planetary-mag-fields')
     
-    # Earth and Jupiter already done with new format
-    planets_to_generate = ['saturn', 'uranus', 'neptune']
+    # Regenerate all planets with new flux tube format
+    planets_to_generate = ['earth', 'jupiter', 'saturn', 'uranus', 'neptune']
     
     for planet in planets_to_generate:
         generate_field_lines_for_planet(planet)

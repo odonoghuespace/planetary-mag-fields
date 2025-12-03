@@ -1031,11 +1031,32 @@
                             }
                             fluxTube.geometry.setPositions(positions);
                             fluxTube.computeLineDistances();
+                        } else {
+                            fluxTube.visible = false;
                         }
                     } else {
-                        // New format: use middle radial sample (no scaling)
+                        // New format: use the radial sample
                         const radialSample = ftData.radialSamples[ftData.currentRadialIndex];
-                        lineData = radialSample.lines[lonIndex];
+                        let lineData = radialSample.lines[lonIndex];
+                        
+                        // If this longitude has no valid data, find nearest valid neighbor
+                        if (!lineData || lineData.length < 5) {
+                            // Search up to 10 degrees in each direction
+                            for (let offset = 1; offset <= 10; offset++) {
+                                const prevIdx = (lonIndex - offset + ftData.numLons) % ftData.numLons;
+                                const nextIdx = (lonIndex + offset) % ftData.numLons;
+                                
+                                if (radialSample.lines[prevIdx] && radialSample.lines[prevIdx].length >= 5) {
+                                    lineData = radialSample.lines[prevIdx];
+                                    break;
+                                }
+                                if (radialSample.lines[nextIdx] && radialSample.lines[nextIdx].length >= 5) {
+                                    lineData = radialSample.lines[nextIdx];
+                                    break;
+                                }
+                            }
+                        }
+                        
                         if (lineData && lineData.length >= 5) {
                             const positions = [];
                             for (const p of lineData) {
@@ -1043,6 +1064,10 @@
                             }
                             fluxTube.geometry.setPositions(positions);
                             fluxTube.computeLineDistances();
+                            fluxTube.visible = true;
+                        } else {
+                            // No valid data found - hide the flux tube
+                            fluxTube.visible = false;
                         }
                     }
                 }
