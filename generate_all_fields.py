@@ -212,6 +212,69 @@ def trace_field_line_bidirectional(start_pos, get_field_func, ds=0.02, max_steps
     backward.reverse()
     return backward + forward
 
+def generate_grid_field_lines(get_B, max_r=500, r_min=1.1, r_max=10.0, step=0.1):
+    """
+    Generate field lines from a 3D grid of starting points.
+    For Uranus/Neptune where the magnetic field is highly tilted,
+    we sample points at X,Y,Z = ±r_min to ±r_max in steps.
+    Returns a dict mapping radial distance shells to field lines.
+    """
+    print(f"  Generating grid field lines from r={r_min} to r={r_max} (step {step})")
+    
+    # Create grid values: negative to positive
+    grid_vals = np.arange(r_min, r_max + step/2, step)
+    grid_vals = np.concatenate([-grid_vals[::-1], grid_vals])  # e.g., [-10, ..., -1.1, 1.1, ..., 10]
+    
+    # Dictionary to store field lines by their starting radial distance
+    field_lines_by_r = {}
+    total_lines = 0
+    
+    # Sample on all 6 faces of a cube at each radial distance
+    radial_shells = np.arange(r_min, r_max + step/2, step)
+    
+    for r_shell in radial_shells:
+        r_key = round(r_shell, 1)
+        lines = []
+        
+        # Generate starting points on the surface of a cube at this radial distance
+        # Use 24 evenly spaced points per shell (like regular L-shells)
+        num_points = 24
+        
+        for i in range(num_points):
+            # Distribute points on sphere surface using Fibonacci spiral
+            phi = 2 * np.pi * i / num_points
+            # Place points in a ring around z-axis at this radius
+            theta = np.pi / 2  # equatorial plane
+            
+            start_x = r_shell * np.cos(phi) * np.sin(theta)
+            start_y = r_shell * np.sin(phi) * np.sin(theta)
+            start_z = r_shell * np.cos(theta)  # = 0 for equator
+            
+            points = trace_field_line_bidirectional(
+                [start_x, start_y, start_z],
+                get_B,
+                ds=0.02 if r_shell < 5 else 0.05,
+                max_steps=50000,
+                max_r=max_r
+            )
+            
+            if len(points) > 10:
+                # Convert to Three.js coords: swap y and z
+                threejs_points = [[p[0], p[2], p[1]] for p in points]
+                threejs_points = [[round(c, 2) for c in p] for p in threejs_points]
+                lines.append(threejs_points)
+        
+        if lines:
+            field_lines_by_r[r_key] = {
+                'L': r_key,
+                'lines': lines
+            }
+            total_lines += len(lines)
+            print(f"    r = {r_key}: {len(lines)} lines")
+    
+    print(f"  Total: {total_lines} field lines across {len(field_lines_by_r)} radial shells")
+    return field_lines_by_r
+
 def generate_field_lines_for_planet(planet_key):
     """Generate field lines for a single planet."""
     config = PLANETS[planet_key]
@@ -241,68 +304,21 @@ def generate_field_lines_for_planet(planet_key):
     # Get magnetic tilt if present (for Uranus/Neptune)
     magnetic_tilt = config.get('magnetic_tilt', 0.0)
     
-    # Generate regular L-shells with 24 longitudes for visualization
-    for L in l_shells:
-        print(f"  L = {L}...", end=' ', flush=True)
-        lines = []
-        
-        for i in range(num_longitudes):
-            phi = 2 * np.pi * i / num_longitudes
-            # Start in MAGNETIC equatorial plane at distance L
-            start_x = L * np.cos(phi)
-            start_y = L * np.sin(phi)
-            start_z = 0.0
-            
-            # If field has magnetic tilt, rotate from magnetic frame to rotation frame for display
-            if magnetic_tilt > 0:
-                start_pos = rotate_to_rotation_frame(np.array([start_x, start_y, start_z]), magnetic_tilt)
-            else:
-                start_pos = np.array([start_x, start_y, start_z])
-            
-            points = trace_field_line_bidirectional(
-                start_pos.tolist(),
-                get_B,
-                ds=0.02 if L < 5 else 0.05,
-                max_steps=20000,
-                max_r=max_r
-            )
-            
-            if len(points) > 10:
-                # Convert to Three.js coords: swap y and z
-                threejs_points = [[p[0], p[2], p[1]] for p in points]
-                threejs_points = [[round(c, 3) for c in p] for p in threejs_points]
-                lines.append(threejs_points)
-        
-        print(f"{len(lines)} lines")
-        all_l_shells.append({
-            'L': L,
-            'lines': lines
-        })
-    
-    # Generate moon flux tubes: 360 longitudes (1° steps) at exact orbital radius
-    # Moon orbits are nearly circular (e < 0.005), so we only need 1 radial sample
-    moon_flux_tubes = []
-    for moon in config.get('moons', []):
-        moon_name = moon['name']
-        orbit_r = moon['orbit_radius']
-        
-        # Just use the exact orbital radius - orbits are circular
-        radial_samples = [orbit_r]
-        
-        print(f"  Moon {moon_name}: flux tubes at L = {orbit_r} (360 lons)")
-        
-        flux_tube_data = {
-            'moon_name': moon_name,
-            'orbit_radius': orbit_r,
-            'radial_samples': []
-        }
-        
-        for L in radial_samples:
-            print(f"    L = {L}...", end=' ', flush=True)
+    # For Uranus and Neptune, use grid-based approach due to highly tilted fields
+    if planet_key in ['uranus', 'neptune']:
+        print(f"  Using grid-based L-shell generation for {config['name']}")
+        # Generate field lines from grid points at r = 1.1 to 10 in steps of 0.1
+        grid_shells = generate_grid_field_lines(get_B, max_r=500, r_min=1.1, r_max=10.0, step=0.1)
+        # Convert to list format
+        all_l_shells = list(grid_shells.values())
+    else:
+        # Generate regular L-shells with 24 longitudes for visualization
+        for L in l_shells:
+            print(f"  L = {L}...", end=' ', flush=True)
             lines = []
             
-            for i in range(360):  # 1 degree steps
-                phi = 2 * np.pi * i / 360
+            for i in range(num_longitudes):
+                phi = 2 * np.pi * i / num_longitudes
                 # Start in MAGNETIC equatorial plane at distance L
                 start_x = L * np.cos(phi)
                 start_y = L * np.sin(phi)
@@ -314,30 +330,79 @@ def generate_field_lines_for_planet(planet_key):
                 else:
                     start_pos = np.array([start_x, start_y, start_z])
                 
-                # Use smaller step size and more steps for better tracing
                 points = trace_field_line_bidirectional(
                     start_pos.tolist(),
                     get_B,
-                    ds=0.01,  # Smaller step for accuracy
-                    max_steps=100000,  # Many more steps to trace very far
-                    max_r=max_r * 3  # Triple the max radius to ensure we capture full extent
+                    ds=0.02 if L < 5 else 0.05,
+                    max_steps=20000,
+                    max_r=max_r
                 )
                 
                 if len(points) > 10:
+                    # Convert to Three.js coords: swap y and z
                     threejs_points = [[p[0], p[2], p[1]] for p in points]
-                    threejs_points = [[round(c, 3) for c in p] for p in threejs_points]
+                    threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
                     lines.append(threejs_points)
-                else:
-                    # If tracing failed, add empty placeholder to maintain indexing
-                    lines.append(None)
             
-            # Count valid lines
-            valid_count = sum(1 for l in lines if l is not None)
-            print(f"{valid_count} valid lines")
-            flux_tube_data['radial_samples'].append({
+            print(f"{len(lines)} lines")
+            all_l_shells.append({
                 'L': L,
                 'lines': lines
             })
+    
+    # Generate moon flux tubes: 720 longitudes (0.5° steps) at exact orbital radius
+    # Moon orbits are nearly circular (e < 0.005), so we only need 1 radial sample
+    moon_flux_tubes = []
+    for moon in config.get('moons', []):
+        moon_name = moon['name']
+        orbit_r = moon['orbit_radius']
+        
+        print(f"  Moon {moon_name}: flux tubes at L = {orbit_r:.3f} (720 lons, 0.5° steps)")
+        
+        flux_tube_data = {
+            'moon_name': moon_name,
+            'orbit_radius': orbit_r,
+            'radial_samples': []
+        }
+        
+        print(f"    L = {orbit_r:.3f}...", end=' ', flush=True)
+        lines = []
+        
+        for i in range(720):  # 0.5 degree steps for smooth coverage
+            phi = 2 * np.pi * i / 720
+            # MOON FLUX TUBES: Start in ROTATION equatorial plane where moons actually orbit
+            # (not magnetic equatorial plane - that's only for L-shell visualization lines)
+            start_x = orbit_r * np.cos(phi)
+            start_y = orbit_r * np.sin(phi)
+            start_z = 0.0  # z=0 in ROTATION frame (where moons orbit)
+            
+            start_pos = np.array([start_x, start_y, start_z])
+            
+            # Use smaller step size and more steps for better tracing
+            # max_r = 500 to ensure we capture full extent for all planets
+            points = trace_field_line_bidirectional(
+                start_pos.tolist(),
+                get_B,
+                ds=0.01,  # Smaller step for accuracy
+                max_steps=100000,  # Many more steps to trace very far
+                max_r=500  # 500 planetary radii to ensure full coverage
+            )
+            
+            if len(points) > 10:
+                threejs_points = [[p[0], p[2], p[1]] for p in points]
+                threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
+                lines.append(threejs_points)
+            else:
+                # If tracing failed, add empty placeholder to maintain indexing
+                lines.append(None)
+        
+        # Count valid lines
+        valid_count = sum(1 for l in lines if l is not None)
+        print(f"{valid_count} valid lines")
+        flux_tube_data['radial_samples'].append({
+            'L': orbit_r,
+            'lines': lines
+        })
         
         moon_flux_tubes.append(flux_tube_data)
     
