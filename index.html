@@ -75,6 +75,7 @@
         }
         .planet-btn:hover { background: #333; border-color: #666; }
         .planet-btn.active { background: #445; border-color: #88a; color: #fff; }
+        .planet-btn.mercury { border-left: 3px solid #888; }
         .planet-btn.earth { border-left: 3px solid #4af; }
         .planet-btn.jupiter { border-left: 3px solid #fa4; }
         .planet-btn.saturn { border-left: 3px solid #a8f; }
@@ -211,12 +212,20 @@
                 <input type="checkbox" id="auto-rotate">
                 <label for="auto-rotate">Auto Rotate</label>
             </div>
+            <div class="checkbox-group" id="aurora-group" style="display: none;">
+                <input type="checkbox" id="show-aurora">
+                <label for="show-aurora">Show Aurora</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="show-tilt">
+                <label for="show-tilt" id="tilt-label">Show Axial Tilt (23.4°)</label>
+            </div>
         </div>
         
         <div class="control-group" id="speed-group" style="display: none;">
             <label>Rotation Speed</label>
             <div class="slider-container">
-                <input type="range" id="speed-slider" min="0.1" max="5" value="1" step="0.1">
+                <input type="range" id="speed-slider" min="0.1" max="10" value="1" step="0.1">
                 <span class="value-display" id="speed-value">1.0x</span>
             </div>
         </div>
@@ -325,17 +334,22 @@
         let moonMeshes = [];
         let moonLabels = [];
         let fluxTubeLines = [];  // Array: one group per moon
+        let moonOrbitLines = [];  // Array: orbit circles for each moon
+        let auroraParticles = null;  // Aurora particle system
         let fieldLineGroups = new Map();
         let equatorLine = null;
         let northPoleArrow = null;
         let autoRotate = false;
         let rotationSpeedMultiplier = 1.0;
         let showFluxTube = false;
+        let showAxialTilt = false;
+        let showAurora = false;
         let currentLongitudes = 8;
         let currentThickness = 2;
         let planetRotation = 0;
         let moonOrbitAngles = [];
         let L_SHELLS_LOADED = [];
+        let tiltGroup = null;  // Group to hold all tilted objects
         
         const textureLoader = new THREE.TextureLoader();
         
@@ -434,6 +448,12 @@
         }
         
         function clearScene() {
+            // Remove tiltGroup if exists
+            if (tiltGroup) {
+                scene.remove(tiltGroup);
+                tiltGroup = null;
+            }
+            
             if (planetMesh) {
                 scene.remove(planetMesh);
                 planetMesh.geometry.dispose();
@@ -485,17 +505,34 @@
             moonLabels = [];
             moonOrbitAngles = [];
             
-            // Clear all flux tube groups
-            fluxTubeLines.forEach(ftGroup => {
-                if (ftGroup) {
-                    ftGroup.children.forEach(child => {
-                        if (child.geometry) child.geometry.dispose();
-                        if (child.material) child.material.dispose();
-                    });
-                    scene.remove(ftGroup);
+            // Clear moon orbit lines
+            moonOrbitLines.forEach(orbitLine => {
+                if (orbitLine) {
+                    if (orbitLine.geometry) orbitLine.geometry.dispose();
+                    if (orbitLine.material) orbitLine.material.dispose();
+                    scene.remove(orbitLine);
+                }
+            });
+            moonOrbitLines = [];
+            
+            // Clear aurora particles
+            if (auroraParticles) {
+                if (auroraParticles.geometry) auroraParticles.geometry.dispose();
+                if (auroraParticles.material) auroraParticles.material.dispose();
+                scene.remove(auroraParticles);
+                auroraParticles = null;
+            }
+            
+            // Clear all flux tube lines
+            fluxTubeLines.forEach(ft => {
+                if (ft) {
+                    if (ft.geometry) ft.geometry.dispose();
+                    if (ft.material) ft.material.dispose();
+                    tiltGroup.remove(ft);
                 }
             });
             fluxTubeLines = [];
+            fluxTubeData = [];
             
             fieldLineGroups.forEach(group => {
                 group.children.forEach(child => {
@@ -540,7 +577,7 @@
             }
             
             planetMesh = new THREE.Mesh(geometry, material);
-            scene.add(planetMesh);
+            tiltGroup.add(planetMesh);
         }
         
         function createEquator(data) {
@@ -564,11 +601,12 @@
                 opacity: 0.7
             });
             equatorLine = new THREE.Line(geometry, material);
-            scene.add(equatorLine);
+            tiltGroup.add(equatorLine);
         }
         
         function createNorthPoleArrow(data) {
             const oblateness = data.oblateness || 1.0;
+            // flip_north is only used when axial tilt is shown - when tilt is off, north is always up
             const arrowGroup = new THREE.Group();
             
             // Arrow shaft - from south pole through north pole (2x longer, thicker)
@@ -580,14 +618,15 @@
             shaft.position.y = 0;  // Centered at origin
             arrowGroup.add(shaft);
             
-            // Arrow head cone at north pole (2x larger)
+            // Arrow head cone - always points up (north) when tilt is off
+            // When tilt is on and flip_north is true, the tiltGroup rotation handles it
             const coneGeometry = new THREE.ConeGeometry(0.12, 0.3, 8);
             const coneMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
             const cone = new THREE.Mesh(coneGeometry, coneMaterial);
             cone.position.y = shaftLength / 2 + 0.15;  // Top of shaft + half cone height
             arrowGroup.add(cone);
             
-            // Add "N" label (white)
+            // Add "N" label (white) - always at the top
             const labelDiv = document.createElement('div');
             labelDiv.textContent = 'N';
             labelDiv.style.cssText = 'color:#ffffff;font-size:14px;font-weight:bold;text-shadow:0 0 3px #000;';
@@ -596,7 +635,7 @@
             arrowGroup.add(label);
             
             northPoleArrow = arrowGroup;
-            scene.add(northPoleArrow);
+            tiltGroup.add(northPoleArrow);
         }
         
         function createRings() {
@@ -627,13 +666,38 @@
             });
             
             ringsMesh = ringsGroup;
-            scene.add(ringsMesh);
+            tiltGroup.add(ringsMesh);
         }
         
         function createMoons(data) {
             if (!data.moons || data.moons.length === 0) return;
             
             data.moons.forEach((moon, index) => {
+                // Create moon orbit circle using thick lines
+                const orbitSegments = 128;
+                const orbitPositions = [];
+                for (let i = 0; i <= orbitSegments; i++) {
+                    const theta = (i / orbitSegments) * Math.PI * 2;
+                    orbitPositions.push(
+                        Math.cos(theta) * moon.orbit_radius,
+                        0,
+                        Math.sin(theta) * moon.orbit_radius
+                    );
+                }
+                const orbitGeometry = new LineGeometry();
+                orbitGeometry.setPositions(orbitPositions);
+                const orbitMaterial = new LineMaterial({ 
+                    color: 0x888888,
+                    linewidth: 2,
+                    transparent: true,
+                    opacity: 0.7,
+                    resolution: new THREE.Vector2(window.innerWidth, window.innerHeight)
+                });
+                const orbitLine = new Line2(orbitGeometry, orbitMaterial);
+                orbitLine.computeLineDistances();
+                tiltGroup.add(orbitLine);
+                moonOrbitLines.push(orbitLine);
+                
                 // Make moons visually 2x thicker than flux tubes
                 // Flux tube linewidth is 4 pixels, so moon should be clearly larger
                 // Using 0.15 radius makes moons nicely visible compared to flux tube lines
@@ -648,7 +712,7 @@
                 moonMesh.position.set(moon.orbit_radius, 0, 0);
                 moonMesh.userData = moon;
                 moonMesh.userData.displaySize = moonSize;
-                scene.add(moonMesh);
+                tiltGroup.add(moonMesh);
                 moonMeshes.push(moonMesh);
                 
                 const labelDiv = document.createElement('div');
@@ -676,7 +740,7 @@
                 createLinesForGroup(group, currentLongitudes, oblateness);
                 
                 fieldLineGroups.set(L, group);
-                scene.add(group);
+                tiltGroup.add(group);
             });
             
             L_SHELLS_LOADED = data.l_shells.map(ls => ls.L);
@@ -794,46 +858,104 @@
             });
         }
         
-        // Create ONE flux tube per moon, using the field line at longitude 0
-        // We'll rotate this dynamically to follow the moon
+        // Store flux tube data for each moon - using dedicated high-res moon_flux_tubes data
+        // These are fixed in the magnetic field frame (rotate with planet)
+        // The moon moves through them as it orbits
+        // Data structure: moon_flux_tubes[moonIndex].radial_samples[radialIndex].lines[lonIndex]
+        let fluxTubeData = [];  // Array of {radialSamples, numLons, currentIndex, line} per moon
+        
         function createFluxTubes(data) {
             if (!data.moons || data.moons.length === 0) return;
+            if (!data.moon_flux_tubes || data.moon_flux_tubes.length === 0) {
+                console.log('No moon flux tube data found - using legacy l_shells');
+                createFluxTubesLegacy(data);
+                return;
+            }
             
+            data.moon_flux_tubes.forEach((moonFT, moonIndex) => {
+                if (!moonFT || !moonFT.radial_samples || moonFT.radial_samples.length === 0) {
+                    fluxTubeLines.push(null);
+                    fluxTubeData.push(null);
+                    return;
+                }
+                
+                // Use the middle radial sample (closest to actual orbit)
+                const midIndex = Math.floor(moonFT.radial_samples.length / 2);
+                const primarySample = moonFT.radial_samples[midIndex];
+                const numLines = primarySample.lines.length;
+                
+                console.log(`Moon ${moonFT.moon_name}: ${moonFT.radial_samples.length} radial samples, ${numLines} longitudes each`);
+                
+                // Create ONE Line2 object per moon - we'll update its geometry dynamically
+                const firstValidLine = primarySample.lines.find(l => l && l.length >= 5);
+                if (!firstValidLine) {
+                    fluxTubeLines.push(null);
+                    fluxTubeData.push(null);
+                    return;
+                }
+                
+                const positions = [];
+                for (const p of firstValidLine) {
+                    positions.push(p[0], p[1], p[2]);  // No scaling needed - data is already at correct L
+                }
+                
+                const geometry = new LineGeometry();
+                geometry.setPositions(positions);
+                
+                const material = new LineMaterial({
+                    color: FLUX_TUBE_COLORS[moonIndex % FLUX_TUBE_COLORS.length],
+                    linewidth: 4,
+                    resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+                    transparent: true,
+                    opacity: 0.9
+                });
+                
+                const fluxTube = new Line2(geometry, material);
+                fluxTube.computeLineDistances();
+                fluxTube.visible = false;
+                tiltGroup.add(fluxTube);
+                
+                fluxTubeLines.push(fluxTube);
+                fluxTubeData.push({
+                    radialSamples: moonFT.radial_samples,  // All radial samples
+                    numLons: numLines,
+                    currentLonIndex: -1,
+                    currentRadialIndex: midIndex
+                });
+            });
+        }
+        
+        // Legacy function for old data format without moon_flux_tubes
+        function createFluxTubesLegacy(data) {
             data.moons.forEach((moon, moonIndex) => {
                 const moonOrbit = moon.orbit_radius;
-                
-                // Find L-shell closest to moon orbit
-                let closestL = null;
-                let closestDist = Infinity;
                 let closestLData = null;
+                let closestDist = Infinity;
                 
                 for (const lData of data.l_shells) {
                     const dist = Math.abs(lData.L - moonOrbit);
                     if (dist < closestDist) {
                         closestDist = dist;
-                        closestL = lData.L;
                         closestLData = lData;
                     }
                 }
                 
                 if (!closestLData || !closestLData.lines || closestLData.lines.length === 0) {
                     fluxTubeLines.push(null);
+                    fluxTubeData.push(null);
                     return;
                 }
                 
-                console.log(`Moon ${moon.name}: using L=${closestL} with ${closestLData.lines.length} lines`);
-                
-                // Use the first field line (at longitude 0)
-                const lineData = closestLData.lines[0];
-                if (!lineData || lineData.length < 5) {
+                const scaleFactor = moonOrbit / closestLData.L;
+                const firstValidLine = closestLData.lines.find(l => l && l.length >= 5);
+                if (!firstValidLine) {
                     fluxTubeLines.push(null);
+                    fluxTubeData.push(null);
                     return;
                 }
                 
-                const scaleFactor = moonOrbit / closestL;
                 const positions = [];
-                for (const p of lineData) {
-                    // Scale radially to moon's actual orbit radius
+                for (const p of firstValidLine) {
                     positions.push(p[0] * scaleFactor, p[1], p[2] * scaleFactor);
                 }
                 
@@ -850,38 +972,315 @@
                 
                 const fluxTube = new Line2(geometry, material);
                 fluxTube.computeLineDistances();
+                fluxTube.visible = false;
+                tiltGroup.add(fluxTube);
                 
-                // Put flux tube in a group so we can rotate it
-                const fluxTubeGroup = new THREE.Group();
-                fluxTubeGroup.add(fluxTube);
-                fluxTubeGroup.visible = false;  // Start hidden, will show when toggled
-                scene.add(fluxTubeGroup);
-                
-                fluxTubeLines.push(fluxTubeGroup);
+                fluxTubeLines.push(fluxTube);
+                fluxTubeData.push({
+                    rawLines: closestLData.lines,
+                    scaleFactor: scaleFactor,
+                    numLons: closestLData.lines.length,
+                    currentLonIndex: -1,
+                    isLegacy: true
+                });
             });
         }
         
-        // Update flux tube rotation to follow moon positions
+        // Update flux tubes: show the one the moon is currently in
+        // Flux tubes are fixed in the planet's magnetic field frame
+        // Moon position relative to field = moon orbital angle - planet rotation angle
         function updateFluxTubes() {
             if (!showFluxTube) {
-                // Hide all flux tubes
                 fluxTubeLines.forEach(ft => { 
                     if (ft) ft.visible = false; 
                 });
                 return;
             }
             
-            // For each moon, rotate its flux tube to match its orbital position
             moonMeshes.forEach((moon, moonIndex) => {
-                const ftGroup = fluxTubeLines[moonIndex];
-                if (!ftGroup) return;
+                const fluxTube = fluxTubeLines[moonIndex];
+                const ftData = fluxTubeData[moonIndex];
+                if (!fluxTube || !ftData) return;
                 
-                ftGroup.visible = true;
-                // Rotate the flux tube group to match the moon's orbital angle
-                // The flux tube was created at longitude 0 (along +x axis)
-                // Moon position is at angle moonOrbitAngles from +x axis
-                ftGroup.rotation.y = moonOrbitAngles[moonIndex];
+                fluxTube.visible = true;
+                
+                // Moon's angle in inertial frame
+                const moonAngle = moonOrbitAngles[moonIndex];
+                // Planet (and field) rotation in inertial frame
+                const fieldAngle = planetRotation;
+                // Moon's angle relative to the magnetic field (which flux tube it's in)
+                let relativeAngle = moonAngle - fieldAngle;
+                // Normalize to 0 to 2π
+                relativeAngle = ((relativeAngle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+                
+                // Convert to flux tube index (0 to numLons-1)
+                const lonIndex = Math.floor(relativeAngle / (2 * Math.PI) * ftData.numLons) % ftData.numLons;
+                
+                // Only update geometry if the longitude index changed
+                if (lonIndex !== ftData.currentLonIndex) {
+                    ftData.currentLonIndex = lonIndex;
+                    
+                    let lineData;
+                    if (ftData.isLegacy) {
+                        // Legacy format: rawLines array with scaling
+                        lineData = ftData.rawLines[lonIndex];
+                        if (lineData && lineData.length >= 5) {
+                            const positions = [];
+                            for (const p of lineData) {
+                                positions.push(p[0] * ftData.scaleFactor, p[1], p[2] * ftData.scaleFactor);
+                            }
+                            fluxTube.geometry.setPositions(positions);
+                            fluxTube.computeLineDistances();
+                        }
+                    } else {
+                        // New format: use middle radial sample (no scaling)
+                        const radialSample = ftData.radialSamples[ftData.currentRadialIndex];
+                        lineData = radialSample.lines[lonIndex];
+                        if (lineData && lineData.length >= 5) {
+                            const positions = [];
+                            for (const p of lineData) {
+                                positions.push(p[0], p[1], p[2]);
+                            }
+                            fluxTube.geometry.setPositions(positions);
+                            fluxTube.computeLineDistances();
+                        }
+                    }
+                }
             });
+        }
+        
+        // Aurora L-shells for each planet
+        const AURORA_L_SHELLS = {
+            earth: 6.0,
+            jupiter: 50.0,
+            saturn: 20.0
+        };
+        
+        // Create aurora particles from field line footprints
+        function createAurora(data) {
+            // Only create aurora for Earth, Jupiter, Saturn
+            if (!['earth', 'jupiter', 'saturn'].includes(currentPlanet)) return;
+            
+            const auroraL = AURORA_L_SHELLS[currentPlanet];
+            const oblateness = data.oblateness || 1.0;
+            
+            // Find the L-shell closest to our aurora L
+            let closestLData = null;
+            let closestDist = Infinity;
+            for (const lData of data.l_shells) {
+                const dist = Math.abs(lData.L - auroraL);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestLData = lData;
+                }
+            }
+            
+            if (!closestLData || !closestLData.lines) return;
+            
+            console.log(`Creating aurora at L=${closestLData.L} with ${closestLData.lines.length} field lines`);
+            
+            // Collect footprints from all field lines
+            const particles = [];
+            const colors = [];
+            
+            // Create longitude clumps for variable coverage
+            const numClumps = 8 + Math.floor(Math.random() * 6);  // 8-13 clumps
+            const clumpCenters = [];
+            const clumpWidths = [];
+            for (let c = 0; c < numClumps; c++) {
+                clumpCenters.push(Math.random() * Math.PI * 2);
+                clumpWidths.push(0.2 + Math.random() * 0.4);  // Variable width per clump
+            }
+            
+            // Use ALL available field lines for full 360° coverage
+            // For each field line, also create interpolated aurora between them
+            const totalLines = closestLData.lines.length;
+            // Earth: 0.5° resolution (720 samples), others: 1° resolution (360 samples)
+            const targetLongitudes = currentPlanet === 'earth' ? 720 : 360;
+            const interpolationFactor = Math.ceil(targetLongitudes / totalLines);
+            
+            for (let lonIdx = 0; lonIdx < totalLines * interpolationFactor; lonIdx++) {
+                // Get the base field line and optionally interpolate
+                const baseLineIdx = Math.floor(lonIdx / interpolationFactor) % totalLines;
+                const nextLineIdx = (baseLineIdx + 1) % totalLines;
+                const interpT = (lonIdx % interpolationFactor) / interpolationFactor;
+                
+                const linePoints = closestLData.lines[baseLineIdx];
+                const nextLinePoints = closestLData.lines[nextLineIdx];
+                if (!linePoints || linePoints.length < 5) continue;
+                
+                // Calculate longitude angle for clumping
+                const firstPoint = linePoints[0];
+                const baseLonAngle = Math.atan2(firstPoint[2], firstPoint[0]);
+                const lonAngle = baseLonAngle + (interpT * Math.PI * 2 / totalLines);
+                
+                // Check if this longitude is in a clump (higher density) or gap (lower density)
+                let inClump = false;
+                let clumpIntensity = 0.3;  // Base intensity for gaps
+                for (let c = 0; c < numClumps; c++) {
+                    const dist = Math.abs(lonAngle - clumpCenters[c]);
+                    const wrappedDist = Math.min(dist, Math.PI * 2 - dist);
+                    if (wrappedDist < clumpWidths[c]) {
+                        inClump = true;
+                        clumpIntensity = Math.max(clumpIntensity, 1.0 - (wrappedDist / clumpWidths[c]) * 0.5);
+                    }
+                }
+                
+                // Get footprints at both ends of the field line
+                // Interpolate between this line and next for more coverage
+                const footprints = [];
+                
+                // Northern footprint (first point)
+                const fp1 = linePoints[0];
+                if (nextLinePoints && nextLinePoints.length > 0 && interpT > 0) {
+                    const fp2 = nextLinePoints[0];
+                    footprints.push([
+                        fp1[0] * (1-interpT) + fp2[0] * interpT,
+                        fp1[1] * (1-interpT) + fp2[1] * interpT,
+                        fp1[2] * (1-interpT) + fp2[2] * interpT
+                    ]);
+                } else {
+                    footprints.push(fp1);
+                }
+                
+                // Southern footprint (last point)
+                const sp1 = linePoints[linePoints.length - 1];
+                if (nextLinePoints && nextLinePoints.length > 0 && interpT > 0) {
+                    const sp2 = nextLinePoints[nextLinePoints.length - 1];
+                    footprints.push([
+                        sp1[0] * (1-interpT) + sp2[0] * interpT,
+                        sp1[1] * (1-interpT) + sp2[1] * interpT,
+                        sp1[2] * (1-interpT) + sp2[2] * interpT
+                    ]);
+                } else {
+                    footprints.push(sp1);
+                }
+                
+                footprints.forEach(fp => {
+                    // Vary particle count based on clump intensity
+                    const baseParticles = inClump ? 15 : 5;
+                    const numParticles = Math.floor(baseParticles * clumpIntensity);
+                    
+                    for (let i = 0; i < numParticles; i++) {
+                        // The footprint is already at r~1.0 (surface)
+                        // For oblate planets, we need to account for oblateness
+                        const basePos = new THREE.Vector3(fp[0], fp[1], fp[2]);
+                        const r = basePos.length();
+                        
+                        // Normalize to get direction, then place at oblate surface
+                        const dir = basePos.clone().normalize();
+                        
+                        // For oblate surface: x,z are equatorial, y is polar
+                        // Surface is at: x²/1² + z²/1² + y²/oblateness² = 1
+                        // Simplify: we scale y by oblateness to get unit sphere, find surface, scale back
+                        const surfaceR = 1.0 / Math.sqrt(
+                            dir.x * dir.x + dir.z * dir.z + (dir.y * dir.y) / (oblateness * oblateness)
+                        );
+                        
+                        // Height distribution - planet-specific heights (reduced by 50%)
+                        // Saturn: 0.015 planet radii, Earth/Jupiter: 0.025 planet radii
+                        const maxHeight = currentPlanet === 'saturn' ? 0.015 : 0.025;
+                        const heightFactor = Math.pow(Math.random(), 2.5);  // Concentrated at base
+                        const height = heightFactor * maxHeight;
+                        
+                        // Position at oblate surface + height along radial direction
+                        const pos = dir.clone().multiplyScalar(surfaceR + height);
+                        
+                        // Add tangential spread for fuzziness
+                        const spread = 0.012;
+                        pos.x += (Math.random() - 0.5) * spread;
+                        pos.y += (Math.random() - 0.5) * spread;
+                        pos.z += (Math.random() - 0.5) * spread;
+                        
+                        particles.push(pos.x, pos.y, pos.z);
+                        
+                        // Color variation
+                        let r_col, g, b;
+                        if (currentPlanet === 'saturn') {
+                            const colorType = Math.random();
+                            if (colorType < 0.5) {
+                                r_col = 1.0; g = 0.1 + Math.random() * 0.2; b = 0.2 + Math.random() * 0.3;
+                            } else if (colorType < 0.8) {
+                                r_col = 1.0; g = 0.2 + Math.random() * 0.3; b = 0.4 + Math.random() * 0.3;
+                            } else {
+                                r_col = 0.8 + Math.random() * 0.2; g = 0.1; b = 0.5 + Math.random() * 0.4;
+                            }
+                        } else if (currentPlanet === 'jupiter') {
+                            const colorType = Math.random();
+                            if (colorType < 0.6) {
+                                r_col = 0.4 + Math.random() * 0.2; g = 0.2; b = 0.8 + Math.random() * 0.2;
+                            } else {
+                                r_col = 0.6 + Math.random() * 0.2; g = 0.1; b = 0.9;
+                            }
+                        } else {
+                            const colorType = Math.random();
+                            if (colorType < 0.6) {
+                                r_col = 0.2; g = 0.8 + Math.random() * 0.2; b = 0.3 + Math.random() * 0.2;
+                            } else if (colorType < 0.85) {
+                                r_col = 0.1; g = 0.6 + Math.random() * 0.2; b = 0.8 + Math.random() * 0.2;
+                            } else {
+                                r_col = 0.5 + Math.random() * 0.3; g = 0.2; b = 0.1;
+                            }
+                        }
+                        colors.push(r_col, g, b);
+                    }
+                });
+            }
+            
+            if (particles.length === 0) return;
+            
+            // Create particle system
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(particles, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            
+            const material = new THREE.PointsMaterial({
+                size: 0.025,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.4,  // Half opacity (was 0.8)
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            
+            auroraParticles = new THREE.Points(geometry, material);
+            auroraParticles.visible = showAurora;
+            tiltGroup.add(auroraParticles);
+            
+            console.log(`Created aurora with ${particles.length / 3} particles`);
+        }
+        
+        // Update aurora visibility
+        function updateAurora() {
+            if (auroraParticles) {
+                auroraParticles.visible = showAurora;
+            }
+        }
+        
+        // Apply or remove axial tilt
+        function applyAxialTilt() {
+            if (!tiltGroup || !planetData) return;
+            
+            const axialTilt = planetData.axial_tilt || 0;
+            const flipNorth = planetData.flip_north || false;
+            
+            if (showAxialTilt && axialTilt !== 0) {
+                // Convert to radians and apply tilt around X axis
+                let tiltRad = THREE.MathUtils.degToRad(axialTilt);
+                tiltGroup.rotation.x = tiltRad;
+                
+                // For Uranus (flip_north=true), when tilted, flip the north arrow
+                // because IAU north is actually on the "bottom" side after tilting
+                if (northPoleArrow && flipNorth) {
+                    northPoleArrow.rotation.z = Math.PI;  // Flip 180° so N points to true north
+                }
+            } else {
+                tiltGroup.rotation.x = 0;
+                // Reset north pole arrow when tilt is off
+                if (northPoleArrow) {
+                    northPoleArrow.rotation.z = 0;
+                }
+            }
         }
         
         async function loadPlanet(planetKey) {
@@ -899,6 +1298,10 @@
                 const response = await fetch(`field_lines_${planetKey}.json`);
                 planetData = await response.json();
                 
+                // Create a tilt group to hold all objects that get tilted together
+                tiltGroup = new THREE.Group();
+                scene.add(tiltGroup);
+                
                 createPlanet(planetData);
                 createEquator(planetData);
                 createNorthPoleArrow(planetData);
@@ -906,6 +1309,7 @@
                 createMoons(planetData);
                 createFieldLines(planetData);
                 createFluxTubes(planetData);
+                createAurora(planetData);
                 
                 // Update UI
                 document.getElementById('planet-title').textContent = `${planetData.planet} Magnetic Field`;
@@ -917,11 +1321,24 @@
                 document.getElementById('flux-tube-group').style.display = planetData.moons?.length > 0 ? 'flex' : 'none';
                 document.getElementById('scale-note').style.display = planetData.moons?.length > 0 ? 'block' : 'none';
                 
+                // Show aurora toggle for Earth, Jupiter, Saturn
+                const hasAurora = ['earth', 'jupiter', 'saturn'].includes(planetKey);
+                document.getElementById('aurora-group').style.display = hasAurora ? 'flex' : 'none';
+                document.getElementById('show-aurora').checked = showAurora;
+                
                 if (planetData.moons?.length > 0) {
                     const moonNames = planetData.moons.map(m => m.name).join('/');
                     document.getElementById('moon-label').textContent = `Show ${moonNames}`;
                     document.getElementById('flux-tube-label').textContent = `Show ${moonNames} Flux Tubes`;
                 }
+                
+                // Update axial tilt label with planet's tilt value (IAU convention)
+                const axialTilt = planetData.axial_tilt || 0;
+                document.getElementById('tilt-label').textContent = `Show Axial Tilt (IAU; ${axialTilt.toFixed(1)}°)`;
+                
+                // Reset tilt checkbox state and apply tilt if checked
+                document.getElementById('show-tilt').checked = showAxialTilt;
+                applyAxialTilt();
                 
                 // Update dropdown to show current planet
                 document.getElementById('planet-dropdown').value = planetKey;
@@ -988,9 +1405,19 @@
             updateFluxTubes();
         });
         
+        document.getElementById('show-aurora').addEventListener('change', (e) => {
+            showAurora = e.target.checked;
+            updateAurora();
+        });
+        
         document.getElementById('auto-rotate').addEventListener('change', (e) => {
             autoRotate = e.target.checked;
             document.getElementById('speed-group').style.display = autoRotate ? 'block' : 'none';
+        });
+        
+        document.getElementById('show-tilt').addEventListener('change', (e) => {
+            showAxialTilt = e.target.checked;
+            applyAxialTilt();
         });
         
         document.getElementById('speed-slider').addEventListener('input', (e) => {
@@ -1021,6 +1448,12 @@
                     });
                 }
             });
+            
+            moonOrbitLines.forEach(orbitLine => {
+                if (orbitLine && orbitLine.material && orbitLine.material.resolution) {
+                    orbitLine.material.resolution.set(window.innerWidth, window.innerHeight);
+                }
+            });
         });
         
         function animate() {
@@ -1035,6 +1468,7 @@
                 if (ringsMesh) ringsMesh.rotation.y = planetRotation;
                 if (equatorLine) equatorLine.rotation.y = planetRotation;
                 if (northPoleArrow) northPoleArrow.rotation.y = planetRotation;
+                if (auroraParticles) auroraParticles.rotation.y = planetRotation;
                 
                 fieldLineGroups.forEach(group => {
                     group.rotation.y = planetRotation;
