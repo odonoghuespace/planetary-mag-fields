@@ -1,0 +1,1076 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planetary Magnetic Field Explorer</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+        #canvas-container { width: 100vw; height: 100vh; }
+        #controls {
+            position: fixed;
+            top: 50px;
+            right: 15px;
+            background: rgba(20, 20, 30, 0.9);
+            padding: 12px;
+            border-radius: 9px;
+            min-width: 260px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.5);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            font-size: 0.75em;
+        }
+        h1 {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #planet-title { color: #f0d890; }
+        .control-group { margin-bottom: 10px; }
+        label { display: block; margin-bottom: 5px; font-size: 0.85em; color: #aaa; }
+        .slider-container { display: flex; align-items: center; gap: 8px; }
+        input[type="range"] {
+            flex: 1;
+            appearance: none;
+            height: 5px;
+            background: #333;
+            border-radius: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            background: #f0d890;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .value-display { min-width: 36px; text-align: right; font-weight: bold; color: #f0d890; }
+        .checkbox-group { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+        .checkbox-group input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; }
+        .checkbox-group label { margin: 0; cursor: pointer; color: #ddd; }
+        
+        .planet-selector {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .planet-btn {
+            padding: 6px 12px;
+            border: 1px solid #444;
+            background: #222;
+            color: #aaa;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: all 0.2s;
+        }
+        .planet-btn:hover { background: #333; border-color: #666; }
+        .planet-btn.active { background: #445; border-color: #88a; color: #fff; }
+        .planet-btn.earth { border-left: 3px solid #4af; }
+        .planet-btn.jupiter { border-left: 3px solid #fa4; }
+        .planet-btn.saturn { border-left: 3px solid #a8f; }
+        .planet-btn.uranus { border-left: 3px solid #4fa; }
+        .planet-btn.neptune { border-left: 3px solid #48f; }
+        
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2em;
+            color: #f0d890;
+            z-index: 200;
+            text-align: center;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top-color: #f0d890;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #info { position: fixed; bottom: 15px; left: 15px; font-size: 0.7em; color: #666; max-width: 300px; }
+        #model-info { color: #888; font-size: 0.75em; margin-top: 8px; padding-top: 8px; border-top: 1px solid #333; }
+        #scale-note { 
+            position: fixed; 
+            bottom: 15px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            font-size: 0.65em; 
+            color: #555; 
+            font-style: italic; 
+            display: none;
+        }
+        #planet-selector {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            z-index: 100;
+        }
+        #planet-dropdown {
+            padding: 8px 12px;
+            font-size: 1em;
+            background: rgba(20, 20, 30, 0.9);
+            color: #f0d890;
+            border: 1px solid #444;
+            border-radius: 6px;
+            cursor: pointer;
+            min-width: 140px;
+            backdrop-filter: blur(10px);
+        }
+        #planet-dropdown:hover { border-color: #666; }
+        #planet-dropdown option { background: #222; color: #fff; }
+        #toggle-controls {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            padding: 6px 12px;
+            background: rgba(20, 20, 30, 0.9);
+            color: #aaa;
+            border: 1px solid #444;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8em;
+            z-index: 101;
+            backdrop-filter: blur(10px);
+        }
+        #toggle-controls:hover { background: #333; border-color: #666; color: #fff; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <div id="loading-text">Loading Earth...</div>
+    </div>
+    
+    <div id="planet-selector">
+        <select id="planet-dropdown">
+            <option value="earth">Earth</option>
+            <option value="jupiter">Jupiter</option>
+            <option value="saturn">Saturn</option>
+            <option value="uranus">Uranus</option>
+            <option value="neptune">Neptune</option>
+        </select>
+    </div>
+    
+    <button id="toggle-controls">Hide Controls</button>
+    
+    <div id="controls" style="display: none;">
+        <h1><span id="planet-title">Earth Magnetic Field</span></h1>
+        
+        <div class="control-group">
+            <label>L-Shell Value</label>
+            <div class="slider-container">
+                <input type="range" id="l-slider" min="0" max="27" value="10" step="1">
+                <span class="value-display" id="l-value">6.0</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <label>Longitudes</label>
+            <div class="slider-container">
+                <input type="range" id="longitude-slider" min="1" max="24" value="8" step="1">
+                <span class="value-display" id="longitude-value">8</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <label>Line Thickness</label>
+            <div class="slider-container">
+                <input type="range" id="thickness-slider" min="1" max="8" value="2" step="0.5">
+                <span class="value-display" id="thickness-value">2</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <div class="checkbox-group" id="rings-group" style="display: none;">
+                <input type="checkbox" id="show-rings" checked>
+                <label for="show-rings">Show Rings</label>
+            </div>
+            <div class="checkbox-group" id="moon-group" style="display: none;">
+                <input type="checkbox" id="show-moon" checked>
+                <label for="show-moon" id="moon-label">Show Moon</label>
+            </div>
+            <div class="checkbox-group" id="flux-tube-group" style="display: none;">
+                <input type="checkbox" id="show-flux-tube">
+                <label for="show-flux-tube" id="flux-tube-label">Show Flux Tubes</label>
+            </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="auto-rotate">
+                <label for="auto-rotate">Auto Rotate</label>
+            </div>
+        </div>
+        
+        <div class="control-group" id="speed-group" style="display: none;">
+            <label>Rotation Speed</label>
+            <div class="slider-container">
+                <input type="range" id="speed-slider" min="0.1" max="5" value="1" step="0.1">
+                <span class="value-display" id="speed-value">1.0x</span>
+            </div>
+        </div>
+        
+        <div id="model-info"></div>
+    </div>
+    
+    <div id="canvas-container"></div>
+    <div id="info">Drag to rotate | Scroll to zoom</div>
+    <div id="scale-note">moons not to scale</div>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+        import { Line2 } from 'three/addons/lines/Line2.js';
+        import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+        import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+        
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000008);
+        
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(25, 15, 25);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+        
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(window.innerWidth, window.innerHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        document.getElementById('canvas-container').appendChild(labelRenderer.domElement);
+        
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 2;
+        controls.maxDistance = 200;
+        controls.zoomSpeed = 2.0;
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        sunLight.position.set(15, 8, 15);
+        scene.add(sunLight);
+        const fillLight = new THREE.DirectionalLight(0xffffcc, 0.5);
+        fillLight.position.set(-10, -5, -10);
+        scene.add(fillLight);
+        
+        // Flux tube colors for different moons
+        const FLUX_TUBE_COLORS = [0x33ff88, 0xff8833, 0x8833ff, 0x33ffff];
+        
+        const PLANET_CONFIGS = {
+            earth: {
+                name: 'Earth',
+                fieldColor: 0x44aaff,
+                defaultL: 6,
+                modelInfo: 'IGRF 2020 model',
+                useTexture: 'Earth_Diffuse_1K.jpg'
+            },
+            jupiter: {
+                name: 'Jupiter',
+                fieldColor: 0xffaa44,
+                defaultL: 10,
+                modelInfo: 'JRM33 + Con2020 model'
+            },
+            saturn: {
+                name: 'Saturn',
+                fieldColor: 0xaa88ff,
+                defaultL: 20,
+                modelInfo: 'Cassini 11 model'
+            },
+            uranus: {
+                name: 'Uranus',
+                fieldColor: 0x44ffaa,
+                defaultL: 10,
+                modelInfo: 'GSFC Q3 model'
+            },
+            neptune: {
+                name: 'Neptune',
+                fieldColor: 0x4488ff,
+                defaultL: 10,
+                modelInfo: 'GSFC O8 model'
+            }
+        };
+        
+        // State
+        let currentPlanet = 'earth';
+        let planetData = null;
+        let planetMesh = null;
+        let ringsMesh = null;
+        let moonMeshes = [];
+        let moonLabels = [];
+        let fluxTubeLines = [];  // Array: one group per moon
+        let fieldLineGroups = new Map();
+        let equatorLine = null;
+        let northPoleArrow = null;
+        let autoRotate = false;
+        let rotationSpeedMultiplier = 1.0;
+        let showFluxTube = false;
+        let currentLongitudes = 8;
+        let currentThickness = 2;
+        let planetRotation = 0;
+        let moonOrbitAngles = [];
+        let L_SHELLS_LOADED = [];
+        
+        const textureLoader = new THREE.TextureLoader();
+        
+        // Planet texture creation
+        function createPlanetTexture(planetKey) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            
+            const textures = {
+                earth: () => {
+                    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                    gradient.addColorStop(0, '#aaddff');
+                    gradient.addColorStop(0.15, '#4488cc');
+                    gradient.addColorStop(0.5, '#2266aa');
+                    gradient.addColorStop(0.85, '#4488cc');
+                    gradient.addColorStop(1, '#aaddff');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                },
+                jupiter: () => {
+                    const bands = [
+                        { pos: 0.0, color: '#c4a574' }, { pos: 0.1, color: '#d4b584' },
+                        { pos: 0.2, color: '#e8c898' }, { pos: 0.3, color: '#c4a574' },
+                        { pos: 0.4, color: '#aa8866' }, { pos: 0.5, color: '#e8c898' },
+                        { pos: 0.6, color: '#aa8866' }, { pos: 0.7, color: '#c4a574' },
+                        { pos: 0.8, color: '#e8c898' }, { pos: 1.0, color: '#c4a574' }
+                    ];
+                    for (let y = 0; y < canvas.height; y++) {
+                        const t = y / canvas.height;
+                        for (let i = 0; i < bands.length - 1; i++) {
+                            if (t >= bands[i].pos && t <= bands[i + 1].pos) {
+                                ctx.fillStyle = bands[i].color;
+                                break;
+                            }
+                        }
+                        ctx.fillRect(0, y, canvas.width, 1);
+                    }
+                    ctx.fillStyle = 'rgba(180, 80, 60, 0.6)';
+                    ctx.beginPath();
+                    ctx.ellipse(300, 280, 40, 25, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                },
+                saturn: () => {
+                    const bands = [
+                        { pos: 0.0, color: '#c4a574' }, { pos: 0.25, color: '#e0c998' },
+                        { pos: 0.45, color: '#e8d4a8' }, { pos: 0.5, color: '#f0ddb0' },
+                        { pos: 0.55, color: '#e8d4a8' }, { pos: 0.75, color: '#e0c998' },
+                        { pos: 1.0, color: '#c4a574' }
+                    ];
+                    for (let y = 0; y < canvas.height; y++) {
+                        const t = y / canvas.height;
+                        for (let i = 0; i < bands.length - 1; i++) {
+                            if (t >= bands[i].pos && t <= bands[i + 1].pos) {
+                                ctx.fillStyle = bands[i].color;
+                                break;
+                            }
+                        }
+                        ctx.fillRect(0, y, canvas.width, 1);
+                    }
+                },
+                uranus: () => {
+                    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                    gradient.addColorStop(0, '#88cccc');
+                    gradient.addColorStop(0.5, '#55bbbb');
+                    gradient.addColorStop(1, '#88cccc');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                },
+                neptune: () => {
+                    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                    gradient.addColorStop(0, '#4477cc');
+                    gradient.addColorStop(0.5, '#2255aa');
+                    gradient.addColorStop(1, '#4477cc');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            };
+            
+            textures[planetKey]();
+            
+            // Add noise
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < imageData.data.length; i += 4) {
+                const noise = (Math.random() - 0.5) * 15;
+                imageData.data[i] = Math.max(0, Math.min(255, imageData.data[i] + noise));
+                imageData.data[i + 1] = Math.max(0, Math.min(255, imageData.data[i + 1] + noise));
+                imageData.data[i + 2] = Math.max(0, Math.min(255, imageData.data[i + 2] + noise));
+            }
+            ctx.putImageData(imageData, 0, 0);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            return texture;
+        }
+        
+        function clearScene() {
+            if (planetMesh) {
+                scene.remove(planetMesh);
+                planetMesh.geometry.dispose();
+                planetMesh.material.dispose();
+                planetMesh = null;
+            }
+            
+            if (ringsMesh) {
+                scene.remove(ringsMesh);
+                ringsMesh.children.forEach(child => {
+                    child.geometry.dispose();
+                    child.material.dispose();
+                });
+                ringsMesh = null;
+            }
+            
+            if (equatorLine) {
+                scene.remove(equatorLine);
+                if (equatorLine.geometry) equatorLine.geometry.dispose();
+                if (equatorLine.material) equatorLine.material.dispose();
+                equatorLine = null;
+            }
+            
+            if (northPoleArrow) {
+                // Remove CSS2D label elements
+                northPoleArrow.children.forEach(child => {
+                    if (child.element) {
+                        child.element.remove();
+                    }
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+                scene.remove(northPoleArrow);
+                northPoleArrow = null;
+            }
+            
+            moonMeshes.forEach(moon => {
+                // Remove labels attached to moon
+                moon.children.forEach(child => {
+                    if (child.element) {
+                        child.element.remove();
+                    }
+                });
+                scene.remove(moon);
+                moon.geometry.dispose();
+                moon.material.dispose();
+            });
+            moonMeshes = [];
+            moonLabels = [];
+            moonOrbitAngles = [];
+            
+            // Clear all flux tube groups
+            fluxTubeLines.forEach(ftGroup => {
+                if (ftGroup) {
+                    ftGroup.children.forEach(child => {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) child.material.dispose();
+                    });
+                    scene.remove(ftGroup);
+                }
+            });
+            fluxTubeLines = [];
+            
+            fieldLineGroups.forEach(group => {
+                group.children.forEach(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+                scene.remove(group);
+            });
+            fieldLineGroups.clear();
+        }
+        
+        function createPlanet(data) {
+            const oblateness = data.oblateness || 1.0;
+            const geometry = new THREE.SphereGeometry(1, 64, 32);
+            const positions = geometry.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                positions.setY(i, positions.getY(i) * oblateness);
+            }
+            geometry.computeVertexNormals();
+            
+            const config = PLANET_CONFIGS[currentPlanet];
+            let material;
+            
+            if (config.useTexture) {
+                // Load real texture for Earth
+                const texture = textureLoader.load(config.useTexture);
+                // Rotate texture 180° to align 0° longitude correctly
+                texture.offset.x = 0.5;
+                texture.wrapS = THREE.RepeatWrapping;
+                material = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.8,
+                    metalness: 0.1
+                });
+            } else {
+                const texture = createPlanetTexture(currentPlanet);
+                material = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.8,
+                    metalness: 0.1
+                });
+            }
+            
+            planetMesh = new THREE.Mesh(geometry, material);
+            scene.add(planetMesh);
+        }
+        
+        function createEquator(data) {
+            const oblateness = data.oblateness || 1.0;
+            // Create equator circle at y=0
+            const segments = 128;
+            const points = [];
+            for (let i = 0; i <= segments; i++) {
+                const theta = (i / segments) * Math.PI * 2;
+                points.push(new THREE.Vector3(
+                    Math.cos(theta) * 1.002,  // Slightly outside planet surface
+                    0,
+                    Math.sin(theta) * 1.002
+                ));
+            }
+            
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineBasicMaterial({ 
+                color: 0xffff00,
+                transparent: true,
+                opacity: 0.7
+            });
+            equatorLine = new THREE.Line(geometry, material);
+            scene.add(equatorLine);
+        }
+        
+        function createNorthPoleArrow(data) {
+            const oblateness = data.oblateness || 1.0;
+            const arrowGroup = new THREE.Group();
+            
+            // Arrow shaft - from south pole through north pole (2x longer, thicker)
+            // Total length = 2 * oblateness + 1.0 on each side = covers both poles plus extension
+            const shaftLength = oblateness * 2 + 2.0;  // Through planet + 1.0 extension each side
+            const shaftGeometry = new THREE.CylinderGeometry(0.04, 0.04, shaftLength, 8);
+            const shaftMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const shaft = new THREE.Mesh(shaftGeometry, shaftMaterial);
+            shaft.position.y = 0;  // Centered at origin
+            arrowGroup.add(shaft);
+            
+            // Arrow head cone at north pole (2x larger)
+            const coneGeometry = new THREE.ConeGeometry(0.12, 0.3, 8);
+            const coneMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+            cone.position.y = shaftLength / 2 + 0.15;  // Top of shaft + half cone height
+            arrowGroup.add(cone);
+            
+            // Add "N" label (white)
+            const labelDiv = document.createElement('div');
+            labelDiv.textContent = 'N';
+            labelDiv.style.cssText = 'color:#ffffff;font-size:14px;font-weight:bold;text-shadow:0 0 3px #000;';
+            const label = new CSS2DObject(labelDiv);
+            label.position.set(0, shaftLength / 2 + 0.5, 0);
+            arrowGroup.add(label);
+            
+            northPoleArrow = arrowGroup;
+            scene.add(northPoleArrow);
+        }
+        
+        function createRings() {
+            if (currentPlanet !== 'saturn') return;
+            
+            const ringsGroup = new THREE.Group();
+            const RING_STRUCTURE = [
+                { inner: 1.110, outer: 1.236, opacity: 0.15, brightness: 0.3 },
+                { inner: 1.239, outer: 1.527, opacity: 0.50, brightness: 0.525 },
+                { inner: 1.527, outer: 1.951, opacity: 0.85, brightness: 1.0 },
+                { inner: 1.951, outer: 2.023, opacity: 0.05, brightness: 0.15 },
+                { inner: 2.023, outer: 2.270, opacity: 0.65, brightness: 0.7 },
+                { inner: 2.310, outer: 2.330, opacity: 0.4, brightness: 0.5 },
+            ];
+            
+            RING_STRUCTURE.forEach(ring => {
+                const geometry = new THREE.RingGeometry(ring.inner, ring.outer, 128, 1);
+                geometry.rotateX(-Math.PI / 2);
+                const brightness = Math.floor(ring.brightness * 200 + 55);
+                const color = new THREE.Color(`rgb(${brightness}, ${brightness - 20}, ${brightness - 40})`);
+                const material = new THREE.MeshBasicMaterial({
+                    color: color,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: ring.opacity
+                });
+                ringsGroup.add(new THREE.Mesh(geometry, material));
+            });
+            
+            ringsMesh = ringsGroup;
+            scene.add(ringsMesh);
+        }
+        
+        function createMoons(data) {
+            if (!data.moons || data.moons.length === 0) return;
+            
+            data.moons.forEach((moon, index) => {
+                // Make moons visually 2x thicker than flux tubes
+                // Flux tube linewidth is 4 pixels, so moon should be clearly larger
+                // Using 0.15 radius makes moons nicely visible compared to flux tube lines
+                const moonSize = 0.15;
+                const geometry = new THREE.SphereGeometry(moonSize, 16, 16);
+                const material = new THREE.MeshStandardMaterial({
+                    color: 0xffffff,
+                    roughness: 0.8,
+                    emissive: 0x333333
+                });
+                const moonMesh = new THREE.Mesh(geometry, material);
+                moonMesh.position.set(moon.orbit_radius, 0, 0);
+                moonMesh.userData = moon;
+                moonMesh.userData.displaySize = moonSize;
+                scene.add(moonMesh);
+                moonMeshes.push(moonMesh);
+                
+                const labelDiv = document.createElement('div');
+                labelDiv.textContent = moon.name;
+                labelDiv.style.cssText = 'color:#fff;font-size:11px;text-shadow:0 0 4px #000;font-weight:bold;';
+                const label = new CSS2DObject(labelDiv);
+                label.position.set(0, moonSize + 0.1, 0);
+                moonMesh.add(label);
+                moonLabels.push(label);
+                
+                moonOrbitAngles.push(0);
+            });
+        }
+        
+        function createFieldLines(data) {
+            const oblateness = data.oblateness || 1.0;
+            
+            data.l_shells.forEach((lData) => {
+                const L = lData.L;
+                const group = new THREE.Group();
+                group.visible = false;
+                group.userData.L = L;
+                group.userData.allLines = lData.lines;
+                
+                createLinesForGroup(group, currentLongitudes, oblateness);
+                
+                fieldLineGroups.set(L, group);
+                scene.add(group);
+            });
+            
+            L_SHELLS_LOADED = data.l_shells.map(ls => ls.L);
+            
+            const slider = document.getElementById('l-slider');
+            slider.max = L_SHELLS_LOADED.length - 1;
+            
+            const config = PLANET_CONFIGS[currentPlanet];
+            const defaultL = config.defaultL;
+            let defaultIndex = 0;
+            for (let i = 0; i < L_SHELLS_LOADED.length; i++) {
+                if (L_SHELLS_LOADED[i] >= defaultL) {
+                    defaultIndex = i;
+                    break;
+                }
+            }
+            slider.value = defaultIndex;
+            updateVisibleFieldLines(L_SHELLS_LOADED[defaultIndex]);
+            document.getElementById('l-value').textContent = L_SHELLS_LOADED[defaultIndex].toFixed(1);
+        }
+        
+        function extendToSurface(point, oblateness) {
+            const x = point[0], y = point[1], z = point[2];
+            const a = x*x + z*z + (y/oblateness)*(y/oblateness);
+            if (a < 0.001) return [x, y, z];
+            const s = 1.0 / Math.sqrt(a);
+            return [x * s, y * s, z * s];
+        }
+        
+        function createLinesForGroup(group, numLongitudes, oblateness) {
+            while (group.children.length > 0) {
+                const child = group.children[0];
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+                group.remove(child);
+            }
+            
+            const L = group.userData.L;
+            const allLines = group.userData.allLines;
+            if (!allLines || allLines.length === 0) return;
+            
+            const totalLines = allLines.length;
+            
+            for (let i = 0; i < numLongitudes; i++) {
+                const lineIndex = Math.floor((i * totalLines) / numLongitudes) % totalLines;
+                const pointsData = allLines[lineIndex];
+                
+                if (pointsData && pointsData.length > 5) {
+                    const positions = [];
+                    
+                    const startExt = extendToSurface(pointsData[0], oblateness);
+                    positions.push(startExt[0], startExt[1], startExt[2]);
+                    
+                    for (const p of pointsData) {
+                        positions.push(p[0], p[1], p[2]);
+                    }
+                    
+                    const endExt = extendToSurface(pointsData[pointsData.length - 1], oblateness);
+                    positions.push(endExt[0], endExt[1], endExt[2]);
+                    
+                    const geometry = new LineGeometry();
+                    geometry.setPositions(positions);
+                    
+                    const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1] || 30;
+                    const t = Math.min((L - 1.1) / (maxL - 1.1), 1.0);
+                    const color = new THREE.Color();
+                    color.setHSL(0.65 - t * 0.65, 1.0, 0.55);
+                    
+                    const material = new LineMaterial({
+                        color: color,
+                        linewidth: currentThickness,
+                        resolution: new THREE.Vector2(window.innerWidth, window.innerHeight)
+                    });
+                    
+                    const line = new Line2(geometry, material);
+                    line.computeLineDistances();
+                    group.add(line);
+                }
+            }
+        }
+        
+        function updateLongitudes(numLongitudes) {
+            currentLongitudes = numLongitudes;
+            const oblateness = planetData?.oblateness || 1.0;
+            fieldLineGroups.forEach((group) => {
+                createLinesForGroup(group, numLongitudes, oblateness);
+            });
+        }
+        
+        function updateThickness(thickness) {
+            currentThickness = thickness;
+            fieldLineGroups.forEach((group) => {
+                group.children.forEach(child => {
+                    if (child.material && child.material.linewidth !== undefined) {
+                        child.material.linewidth = thickness;
+                    }
+                });
+            });
+        }
+        
+        function updateVisibleFieldLines(targetL) {
+            let closestL = null;
+            let closestDist = Infinity;
+            
+            L_SHELLS_LOADED.forEach(L => {
+                const dist = Math.abs(L - targetL);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestL = L;
+                }
+            });
+            
+            fieldLineGroups.forEach((group, L) => {
+                group.visible = (L === closestL);
+            });
+        }
+        
+        // Create ONE flux tube per moon, using the field line at longitude 0
+        // We'll rotate this dynamically to follow the moon
+        function createFluxTubes(data) {
+            if (!data.moons || data.moons.length === 0) return;
+            
+            data.moons.forEach((moon, moonIndex) => {
+                const moonOrbit = moon.orbit_radius;
+                
+                // Find L-shell closest to moon orbit
+                let closestL = null;
+                let closestDist = Infinity;
+                let closestLData = null;
+                
+                for (const lData of data.l_shells) {
+                    const dist = Math.abs(lData.L - moonOrbit);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestL = lData.L;
+                        closestLData = lData;
+                    }
+                }
+                
+                if (!closestLData || !closestLData.lines || closestLData.lines.length === 0) {
+                    fluxTubeLines.push(null);
+                    return;
+                }
+                
+                console.log(`Moon ${moon.name}: using L=${closestL} with ${closestLData.lines.length} lines`);
+                
+                // Use the first field line (at longitude 0)
+                const lineData = closestLData.lines[0];
+                if (!lineData || lineData.length < 5) {
+                    fluxTubeLines.push(null);
+                    return;
+                }
+                
+                const scaleFactor = moonOrbit / closestL;
+                const positions = [];
+                for (const p of lineData) {
+                    // Scale radially to moon's actual orbit radius
+                    positions.push(p[0] * scaleFactor, p[1], p[2] * scaleFactor);
+                }
+                
+                const geometry = new LineGeometry();
+                geometry.setPositions(positions);
+                
+                const material = new LineMaterial({
+                    color: FLUX_TUBE_COLORS[moonIndex % FLUX_TUBE_COLORS.length],
+                    linewidth: 4,
+                    resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+                    transparent: true,
+                    opacity: 0.9
+                });
+                
+                const fluxTube = new Line2(geometry, material);
+                fluxTube.computeLineDistances();
+                
+                // Put flux tube in a group so we can rotate it
+                const fluxTubeGroup = new THREE.Group();
+                fluxTubeGroup.add(fluxTube);
+                fluxTubeGroup.visible = false;  // Start hidden, will show when toggled
+                scene.add(fluxTubeGroup);
+                
+                fluxTubeLines.push(fluxTubeGroup);
+            });
+        }
+        
+        // Update flux tube rotation to follow moon positions
+        function updateFluxTubes() {
+            if (!showFluxTube) {
+                // Hide all flux tubes
+                fluxTubeLines.forEach(ft => { 
+                    if (ft) ft.visible = false; 
+                });
+                return;
+            }
+            
+            // For each moon, rotate its flux tube to match its orbital position
+            moonMeshes.forEach((moon, moonIndex) => {
+                const ftGroup = fluxTubeLines[moonIndex];
+                if (!ftGroup) return;
+                
+                ftGroup.visible = true;
+                // Rotate the flux tube group to match the moon's orbital angle
+                // The flux tube was created at longitude 0 (along +x axis)
+                // Moon position is at angle moonOrbitAngles from +x axis
+                ftGroup.rotation.y = moonOrbitAngles[moonIndex];
+            });
+        }
+        
+        async function loadPlanet(planetKey) {
+            const loader = document.getElementById('loading');
+            const loadingText = document.getElementById('loading-text');
+            
+            loader.style.display = 'block';
+            document.getElementById('controls').style.display = 'none';
+            loadingText.textContent = `Loading ${PLANET_CONFIGS[planetKey].name}...`;
+            
+            clearScene();
+            currentPlanet = planetKey;
+            
+            try {
+                const response = await fetch(`field_lines_${planetKey}.json`);
+                planetData = await response.json();
+                
+                createPlanet(planetData);
+                createEquator(planetData);
+                createNorthPoleArrow(planetData);
+                createRings();
+                createMoons(planetData);
+                createFieldLines(planetData);
+                createFluxTubes(planetData);
+                
+                // Update UI
+                document.getElementById('planet-title').textContent = `${planetData.planet} Magnetic Field`;
+                document.getElementById('model-info').textContent = PLANET_CONFIGS[planetKey].modelInfo;
+                
+                // Show/hide controls based on planet
+                document.getElementById('rings-group').style.display = planetKey === 'saturn' ? 'flex' : 'none';
+                document.getElementById('moon-group').style.display = planetData.moons?.length > 0 ? 'flex' : 'none';
+                document.getElementById('flux-tube-group').style.display = planetData.moons?.length > 0 ? 'flex' : 'none';
+                document.getElementById('scale-note').style.display = planetData.moons?.length > 0 ? 'block' : 'none';
+                
+                if (planetData.moons?.length > 0) {
+                    const moonNames = planetData.moons.map(m => m.name).join('/');
+                    document.getElementById('moon-label').textContent = `Show ${moonNames}`;
+                    document.getElementById('flux-tube-label').textContent = `Show ${moonNames} Flux Tubes`;
+                }
+                
+                // Update dropdown to show current planet
+                document.getElementById('planet-dropdown').value = planetKey;
+                
+                const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1] || 20;
+                camera.position.set(maxL * 1.2, maxL * 0.7, maxL * 1.2);
+                controls.update();
+                
+                loader.style.display = 'none';
+                document.getElementById('controls').style.display = 'block';
+                
+            } catch (error) {
+                console.error('Failed to load planet data:', error);
+                loadingText.textContent = 'Error: ' + error.message;
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('planet-dropdown').addEventListener('change', (e) => {
+            loadPlanet(e.target.value);
+        });
+        
+        // Toggle controls visibility
+        document.getElementById('toggle-controls').addEventListener('click', () => {
+            const controls = document.getElementById('controls');
+            const btn = document.getElementById('toggle-controls');
+            if (controls.style.display === 'none' || controls.style.display === '') {
+                controls.style.display = 'block';
+                btn.textContent = 'Hide Controls';
+            } else {
+                controls.style.display = 'none';
+                btn.textContent = 'Show Controls';
+            }
+        });
+        
+        document.getElementById('l-slider').addEventListener('input', (e) => {
+            const idx = parseInt(e.target.value);
+            const L = L_SHELLS_LOADED[idx] || 1.1;
+            document.getElementById('l-value').textContent = L.toFixed(1);
+            updateVisibleFieldLines(L);
+        });
+        
+        document.getElementById('longitude-slider').addEventListener('input', (e) => {
+            document.getElementById('longitude-value').textContent = e.target.value;
+            updateLongitudes(parseInt(e.target.value));
+        });
+        
+        document.getElementById('thickness-slider').addEventListener('input', (e) => {
+            const thickness = parseFloat(e.target.value);
+            document.getElementById('thickness-value').textContent = thickness.toFixed(1);
+            updateThickness(thickness);
+        });
+        
+        document.getElementById('show-rings').addEventListener('change', (e) => {
+            if (ringsMesh) ringsMesh.visible = e.target.checked;
+        });
+        
+        document.getElementById('show-moon').addEventListener('change', (e) => {
+            moonMeshes.forEach(moon => moon.visible = e.target.checked);
+        });
+        
+        document.getElementById('show-flux-tube').addEventListener('change', (e) => {
+            showFluxTube = e.target.checked;
+            updateFluxTubes();
+        });
+        
+        document.getElementById('auto-rotate').addEventListener('change', (e) => {
+            autoRotate = e.target.checked;
+            document.getElementById('speed-group').style.display = autoRotate ? 'block' : 'none';
+        });
+        
+        document.getElementById('speed-slider').addEventListener('input', (e) => {
+            rotationSpeedMultiplier = parseFloat(e.target.value);
+            document.getElementById('speed-value').textContent = rotationSpeedMultiplier.toFixed(1) + 'x';
+        });
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            
+            fieldLineGroups.forEach((group) => {
+                group.children.forEach(child => {
+                    if (child.material && child.material.resolution) {
+                        child.material.resolution.set(window.innerWidth, window.innerHeight);
+                    }
+                });
+            });
+            
+            fluxTubeLines.forEach(ftGroup => {
+                if (ftGroup) {
+                    ftGroup.children.forEach(child => {
+                        if (child.material && child.material.resolution) {
+                            child.material.resolution.set(window.innerWidth, window.innerHeight);
+                        }
+                    });
+                }
+            });
+        });
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (autoRotate && planetData) {
+                const rotationPeriod = planetData.rotation_period_hours;
+                const planetSpeed = 0.003 * rotationSpeedMultiplier;
+                planetRotation += planetSpeed;
+                
+                if (planetMesh) planetMesh.rotation.y = planetRotation;
+                if (ringsMesh) ringsMesh.rotation.y = planetRotation;
+                if (equatorLine) equatorLine.rotation.y = planetRotation;
+                if (northPoleArrow) northPoleArrow.rotation.y = planetRotation;
+                
+                fieldLineGroups.forEach(group => {
+                    group.rotation.y = planetRotation;
+                });
+                
+                // Animate moons at their correct orbital speeds
+                // Planet rotates at planetSpeed rad/frame
+                // Moon orbital angular velocity = 2π / (period_hours * frames_per_hour)
+                // But we want relative to planet: if planet period = 10h and moon = 40h,
+                // then in 10h planet rotates 360° and moon rotates 90°
+                // So moon angular velocity = planet angular velocity * (planet_period / moon_period)
+                moonMeshes.forEach((moon, index) => {
+                    const moonData = moon.userData;
+                    // Moon orbital angular velocity relative to inertial frame
+                    // If planet rotates 360° in rotationPeriod hours, 
+                    // moon orbits 360° in moonData.period_hours
+                    const orbitRatio = rotationPeriod / moonData.period_hours;
+                    moonOrbitAngles[index] += planetSpeed * orbitRatio;
+                    
+                    // Update moon position
+                    moon.position.x = moonData.orbit_radius * Math.cos(moonOrbitAngles[index]);
+                    moon.position.z = moonData.orbit_radius * -Math.sin(moonOrbitAngles[index]);
+                });
+                
+                // Update flux tubes to follow moons
+                updateFluxTubes();
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        }
+        
+        // Start
+        loadPlanet('earth');
+        animate();
+    </script>
+</body>
+</html>
