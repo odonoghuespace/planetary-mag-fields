@@ -378,7 +378,7 @@ def generate_field_lines_for_planet(planet_key):
         print(f"    L = {orbit_r:.3f}...", end=' ', flush=True)
         lines = []
         
-        # Use 360 samples (1 degree steps) - still smooth but halves file size
+        # Use 360 samples (1 degree steps) - smooth coverage with manageable file size
         num_flux_samples = 360
         for i in range(num_flux_samples):
             phi = 2 * np.pi * i / num_flux_samples
@@ -390,23 +390,23 @@ def generate_field_lines_for_planet(planet_key):
             
             start_pos = np.array([start_x, start_y, start_z])
             
-            # Use moderate step size for good accuracy without excessive points
+            # Use smaller step size for smoother visual quality
             points = trace_field_line_bidirectional(
                 start_pos.tolist(),
                 get_B,
-                ds=0.02,  # Reasonable step for visual quality
-                max_steps=50000,  # Sufficient for reaching surface
+                ds=0.01,  # Smaller step for smoother curves
+                max_steps=100000,  # More steps for complete tracing
                 max_r=500  # 500 planetary radii to ensure full coverage
             )
             
             if len(points) > 10:
-                # Subsample to reduce file size - keep every 3rd point
-                subsampled = points[::3]
+                # Subsample to reduce file size - keep every 2nd point for better resolution
+                subsampled = points[::2]
                 # Ensure we keep the endpoints
                 if points[-1] != subsampled[-1]:
                     subsampled.append(points[-1])
                 threejs_points = [[p[0], p[2], p[1]] for p in subsampled]
-                threejs_points = [[round(c, 1) for c in p] for p in threejs_points]  # 1 decimal place to reduce file size
+                threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places for smoother lines
                 lines.append(threejs_points)
             else:
                 # If tracing failed, add empty placeholder to maintain indexing
