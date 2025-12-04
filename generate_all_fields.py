@@ -163,13 +163,14 @@ def trace_field_line_bidirectional(start_pos, get_field_func, ds=0.02, max_steps
     For Three.js: we swap y<->z (y becomes up).
     
     Stops cleanly at r=1.0 (planet surface) to avoid lines poking through.
+    Uses adaptive step size for better tracing in weak field regions.
     """
     def trace_one_direction(start, direction_sign):
         points = []
         pos = np.array(start, dtype=float)
         prev_r = np.linalg.norm(pos)
         
-        for _ in range(max_steps):
+        for step_num in range(max_steps):
             r = np.linalg.norm(pos)
             
             # Stop if we've crossed the surface (going inward)
@@ -196,11 +197,18 @@ def trace_field_line_bidirectional(start_pos, get_field_func, ds=0.02, max_steps
                 break
             
             B_mag = np.linalg.norm(B)
-            if B_mag < 1e-12:
+            # Much more lenient threshold for weak fields - keep tracing!
+            # Field strength falls off as ~1/r^3, so can be very weak far from planet
+            if B_mag < 1e-20:
                 break
             
             B_unit = B / B_mag
-            pos = pos + direction_sign * B_unit * ds
+            
+            # Adaptive step size: larger steps when far from planet (r > 10)
+            # This helps trace through weak field regions faster
+            adaptive_ds = ds * (1.0 + max(0, (r - 10) / 20))  # Increases smoothly for r > 10
+            
+            pos = pos + direction_sign * B_unit * adaptive_ds
         
         return points
     
@@ -259,8 +267,8 @@ def generate_grid_field_lines(get_B, max_r=500, r_min=1.1, r_max=10.0, step=0.1)
             )
             
             if len(points) > 10:
-                # Convert to Three.js coords: swap y and z
-                threejs_points = [[p[0], p[2], p[1]] for p in points]
+                # Convert to Three.js coords: swap y and z, take every 2nd point to reduce size
+                threejs_points = [[p[0], p[2], p[1]] for p in points[::2]]
                 threejs_points = [[round(c, 2) for c in p] for p in threejs_points]
                 lines.append(threejs_points)
         
@@ -339,8 +347,8 @@ def generate_field_lines_for_planet(planet_key):
                 )
                 
                 if len(points) > 10:
-                    # Convert to Three.js coords: swap y and z
-                    threejs_points = [[p[0], p[2], p[1]] for p in points]
+                    # Convert to Three.js coords: swap y and z, take every 2nd point to reduce size
+                    threejs_points = [[p[0], p[2], p[1]] for p in points[::2]]
                     threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
                     lines.append(threejs_points)
             
@@ -371,34 +379,44 @@ def generate_field_lines_for_planet(planet_key):
         for i in range(720):  # 0.5 degree steps for smooth coverage
             phi = 2 * np.pi * i / 720
             # MOON FLUX TUBES: Start in ROTATION equatorial plane where moons actually orbit
-            # (not magnetic equatorial plane - that's only for L-shell visualization lines)
+            # Use -sin to match Three.js moon position: z = -sin(angle)
             start_x = orbit_r * np.cos(phi)
-            start_y = orbit_r * np.sin(phi)
+            start_y = -orbit_r * np.sin(phi)  # Negative to match viewer's moon.position.z = -sin(angle)
             start_z = 0.0  # z=0 in ROTATION frame (where moons orbit)
             
             start_pos = np.array([start_x, start_y, start_z])
             
-            # Use smaller step size and more steps for better tracing
-            # max_r = 500 to ensure we capture full extent for all planets
+            # Use very small step size and many steps to ensure we always reach the surface
+            # Adaptive stepping will increase step size in weak field regions automatically
             points = trace_field_line_bidirectional(
                 start_pos.tolist(),
                 get_B,
-                ds=0.01,  # Smaller step for accuracy
-                max_steps=100000,  # Many more steps to trace very far
+                ds=0.005,  # Very small initial step for accuracy near moon
+                max_steps=500000,  # MANY steps to ensure we reach surface even in weak fields
                 max_r=500  # 500 planetary radii to ensure full coverage
             )
             
             if len(points) > 10:
-                threejs_points = [[p[0], p[2], p[1]] for p in points]
+                # Take every 2nd point to reduce file size
+                threejs_points = [[p[0], p[2], p[1]] for p in points[::2]]
                 threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
                 lines.append(threejs_points)
             else:
                 # If tracing failed, add empty placeholder to maintain indexing
                 lines.append(None)
         
-        # Count valid lines
+        # Count valid lines and check endpoints
         valid_count = sum(1 for l in lines if l is not None)
-        print(f"{valid_count} valid lines")
+        disconnected_count = 0
+        for l in lines:
+            if l is not None:
+                # Check if endpoints are near surface (r ≈ 1.0)
+                start_r = np.sqrt(l[0][0]**2 + l[0][1]**2 + l[0][2]**2)
+                end_r = np.sqrt(l[-1][0]**2 + l[-1][1]**2 + l[-1][2]**2)
+                if abs(start_r - 1.0) > 0.05 or abs(end_r - 1.0) > 0.05:
+                    disconnected_count += 1
+        
+        print(f"{valid_count} valid lines, {disconnected_count} not reaching surface")
         flux_tube_data['radial_samples'].append({
             'L': orbit_r,
             'lines': lines
