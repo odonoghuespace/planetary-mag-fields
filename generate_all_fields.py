@@ -99,8 +99,8 @@ PLANETS = {
         'flip_north': True,  # GSFCQ3 model has opposite polarity convention
         'l_shells': [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
-                     8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
-                     22.0, 24.0, 26.0, 28.0, 30.0, 35.0, 40.0, 45.0, 50.0],
+                     7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 11.0, 12.0, 13.0, 14.0,
+                     15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
         'max_trace_r': 500,  # Extended to capture full field lines extending far from planet
         'custom_field': None,
         'moons': [
@@ -118,8 +118,8 @@ PLANETS = {
         'magnetic_tilt': 47.0,  # Magnetic axis tilted 47° from rotation axis
         'l_shells': [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
-                     8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,
-                     22.0, 24.0, 26.0, 28.0, 30.0, 35.0, 40.0, 45.0, 50.0],
+                     7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 11.0, 12.0, 13.0, 14.0,
+                     15.0, 16.0, 17.0, 18.0, 19.0, 20.0],
         'max_trace_r': 500,  # Extended to capture full field lines extending far from planet
         'custom_field': None,
         'moons': []

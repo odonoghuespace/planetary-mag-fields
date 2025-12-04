@@ -220,6 +220,10 @@
                 <input type="checkbox" id="show-tilt">
                 <label for="show-tilt" id="tilt-label">Show Axial Tilt (23.4°)</label>
             </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="show-grid">
+                <label for="show-grid">Show Grid</label>
+            </div>
         </div>
         
         <div class="control-group" id="speed-group" style="display: none;">
@@ -339,11 +343,13 @@
         let fieldLineGroups = new Map();
         let equatorLine = null;
         let northPoleArrow = null;
+        let planetGrid = null;  // Planetary grid lines
         let autoRotate = false;
         let rotationSpeedMultiplier = 1.0;
         let showFluxTube = false;
         let showAxialTilt = false;
         let showAurora = false;
+        let showGrid = false;
         let currentLongitudes = 8;
         let currentThickness = 2;
         let planetRotation = 0;
@@ -504,6 +510,15 @@
                 northPoleArrow = null;
             }
             
+            if (planetGrid) {
+                planetGrid.children.forEach(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+                scene.remove(planetGrid);
+                planetGrid = null;
+            }
+            
             moonMeshes.forEach(moon => {
                 // Remove labels attached to moon
                 moon.children.forEach(child => {
@@ -639,6 +654,72 @@
             
             northPoleArrow = arrowGroup;
             tiltGroup.add(northPoleArrow);
+        }
+        
+        function createPlanetaryGrid(data) {
+            const oblateness = data.oblateness || 1.0;
+            const gridGroup = new THREE.Group();
+            
+            // Create latitude lines (parallels)
+            const latitudes = [-60, -30, 0, 30, 60];  // degrees
+            latitudes.forEach(lat => {
+                const latRad = lat * Math.PI / 180;
+                const y = Math.sin(latRad);
+                const radius = Math.cos(latRad) * 1.01;  // Slightly above surface
+                
+                const segments = 64;
+                const points = [];
+                for (let i = 0; i <= segments; i++) {
+                    const theta = (i / segments) * Math.PI * 2;
+                    points.push(new THREE.Vector3(
+                        Math.cos(theta) * radius,
+                        y,
+                        Math.sin(theta) * radius
+                    ));
+                }
+                
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({
+                    color: lat === 0 ? 0xffff00 : 0x4488ff,  // Yellow for equator, blue for others
+                    transparent: true,
+                    opacity: lat === 0 ? 0.7 : 0.4
+                });
+                const line = new THREE.Line(geometry, material);
+                gridGroup.add(line);
+            });
+            
+            // Create longitude lines (meridians)
+            const numMeridians = 12;  // Every 30 degrees
+            for (let i = 0; i < numMeridians; i++) {
+                const lon = (i / numMeridians) * Math.PI * 2;
+                const segments = 64;
+                const points = [];
+                
+                for (let j = 0; j <= segments; j++) {
+                    const lat = ((j / segments) - 0.5) * Math.PI;  // -90 to +90 degrees
+                    const y = Math.sin(lat) * oblateness;
+                    const radius = Math.cos(lat);
+                    
+                    points.push(new THREE.Vector3(
+                        Math.cos(lon) * radius * 1.01,
+                        y * 1.01,
+                        Math.sin(lon) * radius * 1.01
+                    ));
+                }
+                
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({
+                    color: 0x4488ff,
+                    transparent: true,
+                    opacity: 0.4
+                });
+                const line = new THREE.Line(geometry, material);
+                gridGroup.add(line);
+            }
+            
+            gridGroup.visible = showGrid;
+            planetGrid = gridGroup;
+            tiltGroup.add(planetGrid);
         }
         
         function createRings() {
@@ -1523,6 +1604,7 @@
                 createPlanet(planetData);
                 createEquator(planetData);
                 createNorthPoleArrow(planetData);
+                createPlanetaryGrid(planetData);
                 createRings();
                 createMoons(planetData);
                 createFieldLines(planetData);
@@ -1636,6 +1718,13 @@
         document.getElementById('show-tilt').addEventListener('change', (e) => {
             showAxialTilt = e.target.checked;
             applyAxialTilt();
+        });
+        
+        document.getElementById('show-grid').addEventListener('change', (e) => {
+            showGrid = e.target.checked;
+            if (planetGrid) {
+                planetGrid.visible = showGrid;
+            }
         });
         
         document.getElementById('speed-slider').addEventListener('input', (e) => {
