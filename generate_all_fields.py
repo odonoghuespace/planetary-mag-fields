@@ -267,8 +267,8 @@ def generate_grid_field_lines(get_B, max_r=500, r_min=1.1, r_max=10.0, step=0.1)
             )
             
             if len(points) > 10:
-                # Convert to Three.js coords: swap y and z, take every 2nd point to reduce size
-                threejs_points = [[p[0], p[2], p[1]] for p in points[::2]]
+                # Convert to Three.js coords: swap y and z, full resolution
+                threejs_points = [[p[0], p[2], p[1]] for p in points]
                 threejs_points = [[round(c, 2) for c in p] for p in threejs_points]
                 lines.append(threejs_points)
         
@@ -347,8 +347,8 @@ def generate_field_lines_for_planet(planet_key):
                 )
                 
                 if len(points) > 10:
-                    # Convert to Three.js coords: swap y and z, take every 2nd point to reduce size
-                    threejs_points = [[p[0], p[2], p[1]] for p in points[::2]]
+                    # Convert to Three.js coords: swap y and z, full resolution
+                    threejs_points = [[p[0], p[2], p[1]] for p in points]
                     threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
                     lines.append(threejs_points)
             
@@ -397,8 +397,8 @@ def generate_field_lines_for_planet(planet_key):
             )
             
             if len(points) > 10:
-                # Take every 2nd point to reduce file size
-                threejs_points = [[p[0], p[2], p[1]] for p in points[::2]]
+                # Take full resolution for smoother lines
+                threejs_points = [[p[0], p[2], p[1]] for p in points]
                 threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
                 lines.append(threejs_points)
             else:

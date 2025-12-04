@@ -200,29 +200,22 @@
                 <input type="checkbox" id="show-rings" checked>
                 <label for="show-rings">Show Rings</label>
             </div>
-            <div class="checkbox-group" id="moon-group" style="display: none;">
-                <input type="checkbox" id="show-moon" checked>
-                <label for="show-moon" id="moon-label">Show Moon</label>
-            </div>
-            <div class="checkbox-group" id="flux-tube-group" style="display: none;">
-                <input type="checkbox" id="show-flux-tube">
-                <label for="show-flux-tube" id="flux-tube-label">Show Flux Tubes</label>
-            </div>
+
             <div class="checkbox-group">
                 <input type="checkbox" id="auto-rotate">
                 <label for="auto-rotate">Auto Rotate</label>
-            </div>
-            <div class="checkbox-group" id="aurora-group" style="display: none;">
-                <input type="checkbox" id="show-aurora">
-                <label for="show-aurora">Show Aurora</label>
             </div>
             <div class="checkbox-group">
                 <input type="checkbox" id="show-tilt">
                 <label for="show-tilt" id="tilt-label">Show Axial Tilt (23.4°)</label>
             </div>
-            <div class="checkbox-group">
-                <input type="checkbox" id="show-grid">
-                <label for="show-grid">Show Grid</label>
+            <div class="checkbox-group" id="torus-group" style="display: none;">
+                <input type="checkbox" id="show-torus">
+                <label for="show-torus" id="torus-label">Show Torus</label>
+            </div>
+            <div class="checkbox-group" id="flux-tube-group" style="display: none;">
+                <input type="checkbox" id="show-flux-tubes" checked>
+                <label for="show-flux-tubes">Show Flux Tubes</label>
             </div>
         </div>
         
@@ -293,8 +286,15 @@
         fillLight.position.set(-10, -5, -10);
         scene.add(fillLight);
         
-        // Flux tube colors for different moons
-        const FLUX_TUBE_COLORS = [0x33ff88, 0xff8833, 0x8833ff, 0x33ffff];
+        // Flux tube colors for different moons per planet
+        // Jupiter: Io=yellow; Saturn: Enceladus=pale blue; Uranus: Miranda/Ariel=purple/cyan
+        const PLANET_FLUX_TUBE_COLORS = {
+            jupiter: [0xffff00],           // Io = yellow
+            saturn: [0x88ccff],            // Enceladus = pale blue
+            uranus: [0x8833ff, 0x33ffff],  // Miranda = purple, Ariel = cyan
+            neptune: [0x33ff88]            // Triton = green
+        };
+        const FLUX_TUBE_COLORS = [0xffff00, 0xff8833, 0x8833ff, 0x33ffff];  // fallback
         
         const PLANET_CONFIGS = {
             earth: {
@@ -307,7 +307,7 @@
             jupiter: {
                 name: 'Jupiter',
                 fieldColor: 0xffaa44,
-                defaultL: 10,
+                defaultL: 30,
                 modelInfo: 'JRM33 + Con2020 model'
             },
             saturn: {
@@ -344,12 +344,14 @@
         let equatorLine = null;
         let northPoleArrow = null;
         let planetGrid = null;  // Planetary grid lines
+        let plasmaTorus = null;  // Io torus or Enceladus E-ring
         let autoRotate = false;
         let rotationSpeedMultiplier = 1.0;
-        let showFluxTube = false;
+        let showFluxTube = true; // Always show flux tubes
         let showAxialTilt = false;
-        let showAurora = false;
-        let showGrid = false;
+        let showAurora = true;  // Always on
+        let showGrid = true;    // Always on
+        let showTorus = false;
         let currentLongitudes = 8;
         let currentThickness = 2;
         let planetRotation = 0;
@@ -519,6 +521,13 @@
                 planetGrid = null;
             }
             
+            if (plasmaTorus) {
+                if (plasmaTorus.geometry) plasmaTorus.geometry.dispose();
+                if (plasmaTorus.material) plasmaTorus.material.dispose();
+                scene.remove(plasmaTorus);
+                plasmaTorus = null;
+            }
+            
             moonMeshes.forEach(moon => {
                 // Remove labels attached to moon
                 moon.children.forEach(child => {
@@ -660,11 +669,11 @@
             const oblateness = data.oblateness || 1.0;
             const gridGroup = new THREE.Group();
             
-            // Create latitude lines (parallels)
-            const latitudes = [-60, -30, 0, 30, 60];  // degrees
+            // Create latitude lines (parallels) - every 15 degrees
+            const latitudes = [-75, -60, -45, -30, -15, 0, 15, 30, 45, 60, 75];  // degrees
             latitudes.forEach(lat => {
                 const latRad = lat * Math.PI / 180;
-                const y = Math.sin(latRad);
+                const y = Math.sin(latRad) * oblateness;  // Apply oblateness to Y
                 const radius = Math.cos(latRad) * 1.01;  // Slightly above surface
                 
                 const segments = 64;
@@ -680,7 +689,7 @@
                 
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
                 const material = new THREE.LineBasicMaterial({
-                    color: lat === 0 ? 0xffff00 : 0x4488ff,  // Yellow for equator, blue for others
+                    color: lat === 0 ? 0xffff00 : 0xffffff,  // Yellow for equator, white for others
                     transparent: true,
                     opacity: lat === 0 ? 0.7 : 0.4
                 });
@@ -709,7 +718,7 @@
                 
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
                 const material = new THREE.LineBasicMaterial({
-                    color: 0x4488ff,
+                    color: 0xffffff,
                     transparent: true,
                     opacity: 0.4
                 });
@@ -720,6 +729,142 @@
             gridGroup.visible = showGrid;
             planetGrid = gridGroup;
             tiltGroup.add(planetGrid);
+        }
+        
+        function createEnceladusERing() {
+            // Create Enceladus E-ring for Saturn
+            // Inner radius: 3.4 Saturn radii, Outer radius: 4.5 Saturn radii
+            // Thickness: 0.5 Saturn radii, Color: electric blue
+            const particleCount = 37500;  // 25% more particles
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+            
+            const innerRadius = 3.4;
+            const outerRadius = 4.5;
+            const thickness = 0.5;
+            const majorRadius = (innerRadius + outerRadius) / 2;
+            const minorRadius = (outerRadius - innerRadius) / 2;
+            
+            for (let i = 0; i < particleCount; i++) {
+                // Random angle around the ring
+                const theta = Math.random() * Math.PI * 2;
+                
+                // Random radius with slightly more even distribution
+                const r = majorRadius + (Math.random() - 0.5) * 2 * minorRadius * Math.pow(Math.random(), 0.6);
+                
+                // Random vertical offset with slightly more even distribution (Y is up)
+                const y = (Math.random() - 0.5) * thickness * Math.pow(Math.random(), 0.8);
+                
+                positions[i * 3] = r * Math.cos(theta);
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = r * Math.sin(theta);
+                
+                // Electric blue color with slight variation
+                const brightness = 0.7 + Math.random() * 0.3;
+                colors[i * 3] = 0.2 * brightness;
+                colors[i * 3 + 1] = 0.5 * brightness;
+                colors[i * 3 + 2] = 1.0 * brightness;
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            const material = new THREE.PointsMaterial({
+                size: 0.015,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.6,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            
+            plasmaTorus = new THREE.Points(geometry, material);
+            // E-ring is in the equatorial plane (XZ plane), no rotation needed
+            plasmaTorus.visible = showTorus;
+            tiltGroup.add(plasmaTorus);
+        }
+        
+        function createIoTorus(data) {
+            // Create Io plasma torus for Jupiter along magnetic equator
+            // Extract magnetic equator from Io flux tubes
+            if (!data || !data.moon_flux_tubes || data.moon_flux_tubes.length === 0) return;
+            
+            const ioFluxData = data.moon_flux_tubes[0]; // First moon (Io)
+            if (!ioFluxData || !ioFluxData.radial_samples || ioFluxData.radial_samples.length === 0) return;
+            
+            const radialSample = ioFluxData.radial_samples[0]; // L-shell data
+            if (!radialSample || !radialSample.lines) return;
+            
+            // Find the furthest point from planet along each flux tube
+            const magneticEquatorPoints = [];
+            radialSample.lines.forEach(fluxTube => {
+                let maxDistance = 0;
+                let furthestPoint = null;
+                
+                fluxTube.forEach(point => {
+                    const [x, y, z] = point;
+                    const distance = Math.sqrt(x * x + y * y + z * z);
+                    if (distance > maxDistance) {
+                        maxDistance = distance;
+                        furthestPoint = { x, y, z };
+                    }
+                });
+                
+                if (furthestPoint) {
+                    magneticEquatorPoints.push(furthestPoint);
+                }
+            });
+            
+            if (magneticEquatorPoints.length === 0) return;
+            
+            // Create torus particles along magnetic equator
+            const particleCount = 71875;  // 15% more particles (was 62500)
+            const positions = new Float32Array(particleCount * 3);
+            const colors = new Float32Array(particleCount * 3);
+            const thickness = 1.0; // 1 planetary radius thick
+            
+            for (let i = 0; i < particleCount; i++) {
+                // Pick a random point along the magnetic equator
+                const idx = Math.floor(Math.random() * magneticEquatorPoints.length);
+                const equatorPoint = magneticEquatorPoints[idx];
+                
+                // Add random offset in a sphere around the equator point
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const distance = Math.random() * thickness * Math.pow(Math.random(), 0.4);  // Slightly more even distribution
+                
+                const offsetX = distance * Math.sin(phi) * Math.cos(theta);
+                const offsetY = distance * Math.sin(phi) * Math.sin(theta);
+                const offsetZ = distance * Math.cos(phi);
+                
+                positions[i * 3] = equatorPoint.x + offsetX;
+                positions[i * 3 + 1] = equatorPoint.y + offsetY;
+                positions[i * 3 + 2] = equatorPoint.z + offsetZ;
+                
+                // Red color with variation
+                const brightness = 0.6 + Math.random() * 0.4;
+                colors[i * 3] = 1.0 * brightness;
+                colors[i * 3 + 1] = 0.2 * brightness;
+                colors[i * 3 + 2] = 0.15 * brightness;
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            const material = new THREE.PointsMaterial({
+                size: 0.02,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.5,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+            
+            plasmaTorus = new THREE.Points(geometry, material);
+            plasmaTorus.visible = showTorus;
+            tiltGroup.add(plasmaTorus);
         }
         
         function createRings() {
@@ -1022,17 +1167,23 @@
                 const geometry = new LineGeometry();
                 geometry.setPositions(positions);
                 
+                // Get planet-specific color for this moon
+                const planetColors = PLANET_FLUX_TUBE_COLORS[currentPlanet] || FLUX_TUBE_COLORS;
+                const tubeColor = planetColors[moonIndex % planetColors.length];
+                
                 const material = new LineMaterial({
-                    color: FLUX_TUBE_COLORS[moonIndex % FLUX_TUBE_COLORS.length],
+                    color: tubeColor,
                     linewidth: 4,
                     resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
                     transparent: true,
-                    opacity: 0.9
+                    opacity: 0.5,
+                    alphaToCoverage: false,
+                    depthWrite: false
                 });
                 
                 const fluxTube = new Line2(geometry, material);
                 fluxTube.computeLineDistances();
-                fluxTube.visible = false;
+                fluxTube.visible = showFluxTube;
                 tiltGroup.add(fluxTube);
                 
                 fluxTubeLines.push(fluxTube);
@@ -1095,17 +1246,23 @@
                 const geometry = new LineGeometry();
                 geometry.setPositions(positions);
                 
+                // Get planet-specific color for this moon
+                const planetColors = PLANET_FLUX_TUBE_COLORS[currentPlanet] || FLUX_TUBE_COLORS;
+                const tubeColor = planetColors[moonIndex % planetColors.length];
+                
                 const material = new LineMaterial({
-                    color: FLUX_TUBE_COLORS[moonIndex % FLUX_TUBE_COLORS.length],
+                    color: tubeColor,
                     linewidth: 4,
                     resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
                     transparent: true,
-                    opacity: 0.9
+                    opacity: 0.5,
+                    alphaToCoverage: false,
+                    depthWrite: false
                 });
                 
                 const fluxTube = new Line2(geometry, material);
                 fluxTube.computeLineDistances();
-                fluxTube.visible = false;
+                fluxTube.visible = showFluxTube;
                 tiltGroup.add(fluxTube);
                 
                 fluxTubeLines.push(fluxTube);
@@ -1134,6 +1291,7 @@
         //   equatorial plane, following the magnetic field in both directions to the surface
         // - The tube will NOT stay at y=0; it will arc up/down following field lines!
         // - We select the tube by moon's longitude, but the tube extends in 3D
+        // - INTERPOLATION: We blend between adjacent longitude samples for smooth animation
         //
         function updateFluxTubes() {
             if (!showFluxTube) {
@@ -1165,183 +1323,182 @@
                 // Normalize to 0 to 2π
                 moonLongitude = ((moonLongitude % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
                 
-                // Convert to flux tube index (flux tubes are sampled every 0.5° = 2π/720)
-                const lonIndex = Math.round((moonLongitude / (2 * Math.PI)) * ftData.numLons) % ftData.numLons;
+                // Convert to FRACTIONAL flux tube index for interpolation
+                const fractionalIndex = (moonLongitude / (2 * Math.PI)) * ftData.numLons;
+                const lonIndex0 = Math.floor(fractionalIndex) % ftData.numLons;
+                const lonIndex1 = (lonIndex0 + 1) % ftData.numLons;
+                const interpFactor = fractionalIndex - Math.floor(fractionalIndex);  // 0 to 1
                 
-                if (DEBUG_FLUX_TUBES && (lonIndex !== ftData.currentLonIndex || !ftData.lastPositions)) {
+                if (DEBUG_FLUX_TUBES && (lonIndex0 !== ftData.currentLonIndex || !ftData.lastPositions)) {
                     console.log(`[updateFluxTubes] Moon ${moonIndex} (${moonMeshes[moonIndex]?.userData?.name || 'unknown'}): ` +
                                 `pos=(${mx.toFixed(2)}, ${my.toFixed(4)}, ${mz.toFixed(2)}), ` +
                                 `moonLon=${(moonLongitude*180/Math.PI).toFixed(1)}°, ` +
-                                `lonIdx=${lonIndex}/${ftData.numLons}`);
-                    
-                    // VERBOSE: Show the actual line data
-                    const testLine = ftData.radialSamples[ftData.currentRadialIndex].lines[lonIndex];
-                    if (testLine && testLine.length >= 5) {
-                        // JSON format is [x, z, y] where y is rotation axis
-                        const first_r = Math.sqrt(testLine[0][0]**2 + testLine[0][1]**2 + testLine[0][2]**2);
-                        const last_r = Math.sqrt(testLine[testLine.length-1][0]**2 + testLine[testLine.length-1][1]**2 + testLine[testLine.length-1][2]**2);
-                        // Find point nearest equatorial plane crossing
-                        let nearest_y = Infinity;
-                        let nearest_idx = -1;
-                        let nearest_r_xz = 0;
-                        for (let i = 0; i < testLine.length; i++) {
-                            const pt = testLine[i];
-                            const y_abs = Math.abs(pt[2]);  // pt[2] is y-coordinate
-                            if (y_abs < Math.abs(nearest_y)) {
-                                nearest_y = pt[2];
-                                nearest_idx = i;
-                                nearest_r_xz = Math.sqrt(pt[0]**2 + pt[1]**2);  // radius in XZ plane
-                            }
-                        }
-                        console.log(`  -> Line ${lonIndex}: ${testLine.length} pts, r: ${first_r.toFixed(3)} to ${last_r.toFixed(3)}`);
-                        console.log(`     Equator crossing at idx ${nearest_idx}: y=${nearest_y.toFixed(3)}, r_xz=${nearest_r_xz.toFixed(2)}`);
-                    } else {
-                        console.error(`  -> Line at index ${lonIndex}: INVALID! ${testLine ? `only ${testLine.length} points` : 'NULL'}`);
-                    }
+                                `lonIdx=${lonIndex0}+${interpFactor.toFixed(3)}/${ftData.numLons}`);
                 }
                 
-                // Only update geometry if the longitude index changed OR if we don't have geometry yet
-                if (lonIndex !== ftData.currentLonIndex || !ftData.lastPositions) {
-                    ftData.currentLonIndex = lonIndex;
+                // Always update geometry for smooth interpolation
+                ftData.currentLonIndex = lonIndex0;
+                
+                let lineData0 = null;
+                let lineData1 = null;
+                const oblateness = planetData?.oblateness || 1.0;
+                
+                // Helper function to find valid line data with fallback
+                function findValidLineData(startIdx, radialSample) {
+                    let lineData = radialSample ? radialSample.lines[startIdx] : ftData.rawLines?.[startIdx];
+                    if (lineData && lineData.length >= 5) return lineData;
                     
-                    let lineData = null;
-                    const oblateness = planetData?.oblateness || 1.0;
+                    // Search for nearest valid neighbor
+                    for (let offset = 1; offset <= ftData.numLons / 2; offset++) {
+                        const prevIdx = (startIdx - offset + ftData.numLons) % ftData.numLons;
+                        const nextIdx = (startIdx + offset) % ftData.numLons;
+                        const lines = radialSample ? radialSample.lines : ftData.rawLines;
+                        if (lines[prevIdx]?.length >= 5) return lines[prevIdx];
+                        if (lines[nextIdx]?.length >= 5) return lines[nextIdx];
+                    }
+                    return null;
+                }
+                
+                // Helper function to interpolate between two line datasets
+                function interpolateLines(data0, data1, t, scaleFactor = 1.0, isLegacy = false) {
+                    const positions = [];
+                    const len = Math.min(data0.length, data1.length);
                     
-                    if (ftData.isLegacy) {
-                        // Legacy format: rawLines array with scaling
-                        lineData = ftData.rawLines[lonIndex];
-                        
-                        // Fallback to nearest neighbor if needed
-                        if (!lineData || lineData.length < 5) {
-                            if (DEBUG_FLUX_TUBES) console.warn(`[updateFluxTubes] Moon ${moonIndex}: lon ${lonIndex} invalid, searching...`);
-                            for (let offset = 1; offset <= ftData.numLons / 2; offset++) {
-                                const prevIdx = (lonIndex - offset + ftData.numLons) % ftData.numLons;
-                                const nextIdx = (lonIndex + offset) % ftData.numLons;
-                                if (ftData.rawLines[prevIdx]?.length >= 5) {
-                                    lineData = ftData.rawLines[prevIdx];
-                                    if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Using prev neighbor ${prevIdx} (offset ${offset})`);
-                                    break;
-                                }
-                                if (ftData.rawLines[nextIdx]?.length >= 5) {
-                                    lineData = ftData.rawLines[nextIdx];
-                                    if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Using next neighbor ${nextIdx} (offset ${offset})`);
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (lineData && lineData.length >= 5) {
-                            const positions = [];
-                            
-                            // For legacy format, we still need to extend since old data might not reach surface
-                            const startExt = extendToSurface([lineData[0][0] * ftData.scaleFactor, lineData[0][1], lineData[0][2] * ftData.scaleFactor], oblateness);
-                            positions.push(startExt[0], startExt[1], startExt[2]);
-                            
-                            for (const p of lineData) {
-                                positions.push(p[0] * ftData.scaleFactor, p[1], p[2] * ftData.scaleFactor);
-                            }
-                            
-                            const endExt = extendToSurface([lineData[lineData.length - 1][0] * ftData.scaleFactor, lineData[lineData.length - 1][1], lineData[lineData.length - 1][2] * ftData.scaleFactor], oblateness);
-                            positions.push(endExt[0], endExt[1], endExt[2]);
-                            
-                            // CRITICAL FIX: Recreate geometry if size changed
-                            const expectedLength = positions.length;
-                            const currentLength = ftData.lastPositions ? ftData.lastPositions.length : 0;
-                            
-                            if (currentLength !== expectedLength) {
-                                if (fluxTube.geometry) {
-                                    fluxTube.geometry.dispose();
-                                }
-                                const newGeometry = new LineGeometry();
-                                newGeometry.setPositions(positions);
-                                fluxTube.geometry = newGeometry;
-                            } else {
-                                fluxTube.geometry.setPositions(positions);
-                            }
-                            
-                            fluxTube.computeLineDistances();
-                            fluxTube.visible = true;
-                            ftData.lastPositions = positions;
-                            if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Updated geometry with ${lineData.length} points ✓`);
+                    for (let i = 0; i < len; i++) {
+                        const p0 = data0[i];
+                        const p1 = data1[i];
+                        if (isLegacy) {
+                            // Legacy format needs scaling for x and z
+                            const x = p0[0] * scaleFactor * (1 - t) + p1[0] * scaleFactor * t;
+                            const y = p0[1] * (1 - t) + p1[1] * t;
+                            const z = p0[2] * scaleFactor * (1 - t) + p1[2] * scaleFactor * t;
+                            positions.push(x, y, z);
                         } else {
-                            console.error(`[updateFluxTubes] Moon ${moonIndex}: No valid data found!`);
+                            // New format: direct coordinates
+                            const x = p0[0] * (1 - t) + p1[0] * t;
+                            const y = p0[1] * (1 - t) + p1[1] * t;
+                            const z = p0[2] * (1 - t) + p1[2] * t;
+                            positions.push(x, y, z);
                         }
+                    }
+                    return positions;
+                }
+                
+                if (ftData.isLegacy) {
+                    // Legacy format: rawLines array with scaling
+                    lineData0 = findValidLineData(lonIndex0, null);
+                    lineData1 = findValidLineData(lonIndex1, null);
+                    
+                    if (lineData0 && lineData0.length >= 5 && lineData1 && lineData1.length >= 5) {
+                        // Interpolate between the two longitude samples
+                        const positions = interpolateLines(lineData0, lineData1, interpFactor, ftData.scaleFactor, true);
+                        
+                        // Add surface extensions at start and end
+                        const firstPt = [positions[0], positions[1], positions[2]];
+                        const lastPt = [positions[positions.length - 3], positions[positions.length - 2], positions[positions.length - 1]];
+                        const startExt = extendToSurface(firstPt, oblateness);
+                        const endExt = extendToSurface(lastPt, oblateness);
+                        
+                        // Prepend start extension, append end extension
+                        const finalPositions = [startExt[0], startExt[1], startExt[2], ...positions, endExt[0], endExt[1], endExt[2]];
+                        
+                        // Update geometry
+                        const expectedLength = finalPositions.length;
+                        const currentLength = ftData.lastPositions ? ftData.lastPositions.length : 0;
+                        
+                        if (currentLength !== expectedLength) {
+                            if (fluxTube.geometry) fluxTube.geometry.dispose();
+                            const newGeometry = new LineGeometry();
+                            newGeometry.setPositions(finalPositions);
+                            fluxTube.geometry = newGeometry;
+                        } else {
+                            fluxTube.geometry.setPositions(finalPositions);
+                        }
+                        
+                        fluxTube.computeLineDistances();
+                        fluxTube.visible = true;
+                        ftData.lastPositions = finalPositions;
+                    } else if (lineData0 && lineData0.length >= 5) {
+                        // Fallback to single sample if interpolation not possible
+                        const positions = [];
+                        const startExt = extendToSurface([lineData0[0][0] * ftData.scaleFactor, lineData0[0][1], lineData0[0][2] * ftData.scaleFactor], oblateness);
+                        positions.push(startExt[0], startExt[1], startExt[2]);
+                        for (const p of lineData0) {
+                            positions.push(p[0] * ftData.scaleFactor, p[1], p[2] * ftData.scaleFactor);
+                        }
+                        const endExt = extendToSurface([lineData0[lineData0.length - 1][0] * ftData.scaleFactor, lineData0[lineData0.length - 1][1], lineData0[lineData0.length - 1][2] * ftData.scaleFactor], oblateness);
+                        positions.push(endExt[0], endExt[1], endExt[2]);
+                        
+                        const expectedLength = positions.length;
+                        const currentLength = ftData.lastPositions ? ftData.lastPositions.length : 0;
+                        if (currentLength !== expectedLength) {
+                            if (fluxTube.geometry) fluxTube.geometry.dispose();
+                            const newGeometry = new LineGeometry();
+                            newGeometry.setPositions(positions);
+                            fluxTube.geometry = newGeometry;
+                        } else {
+                            fluxTube.geometry.setPositions(positions);
+                        }
+                        fluxTube.computeLineDistances();
+                        fluxTube.visible = true;
+                        ftData.lastPositions = positions;
                     } else {
-                        // New format: use pre-calculated moon flux tubes
-                        const radialSample = ftData.radialSamples[ftData.currentRadialIndex];
-                        lineData = radialSample.lines[lonIndex];
+                        console.error(`[updateFluxTubes] Moon ${moonIndex}: No valid data found!`);
+                    }
+                } else {
+                    // New format: use pre-calculated moon flux tubes with interpolation
+                    const radialSample = ftData.radialSamples[ftData.currentRadialIndex];
+                    lineData0 = findValidLineData(lonIndex0, radialSample);
+                    lineData1 = findValidLineData(lonIndex1, radialSample);
+                    
+                    if (lineData0 && lineData0.length >= 5 && lineData1 && lineData1.length >= 5) {
+                        // Interpolate between the two longitude samples for smooth animation
+                        const positions = interpolateLines(lineData0, lineData1, interpFactor, 1.0, false);
                         
-                        // Fallback to nearest neighbor if this exact longitude is missing
-                        // Search MUCH wider to ensure we ALWAYS find something (up to ±180)
-                        if (!lineData || lineData.length < 5) {
-                            if (DEBUG_FLUX_TUBES) console.warn(`[updateFluxTubes] Moon ${moonIndex}: lon ${lonIndex} invalid, searching...`);
-                            for (let offset = 1; offset <= ftData.numLons / 2; offset++) {
-                                const prevIdx = (lonIndex - offset + ftData.numLons) % ftData.numLons;
-                                const nextIdx = (lonIndex + offset) % ftData.numLons;
-                                if (radialSample.lines[prevIdx]?.length >= 5) {
-                                    lineData = radialSample.lines[prevIdx];
-                                    if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Using prev neighbor ${prevIdx} (offset ${offset})`);
-                                    break;
-                                }
-                                if (radialSample.lines[nextIdx]?.length >= 5) {
-                                    lineData = radialSample.lines[nextIdx];
-                                    if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Using next neighbor ${nextIdx} (offset ${offset})`);
-                                    break;
-                                }
-                            }
+                        // Update geometry
+                        const expectedLength = positions.length;
+                        const currentLength = ftData.lastPositions ? ftData.lastPositions.length : 0;
+                        
+                        if (currentLength !== expectedLength) {
+                            if (fluxTube.geometry) fluxTube.geometry.dispose();
+                            const newGeometry = new LineGeometry();
+                            newGeometry.setPositions(positions);
+                            fluxTube.geometry = newGeometry;
+                        } else {
+                            fluxTube.geometry.setPositions(positions);
                         }
                         
-                        if (lineData && lineData.length >= 5) {
-                            const positions = [];
-                            
-                            // Use flux tube data directly - coordinates are ALREADY in Three.js system!
-                            // JSON format: [x, y, z] where y is rotation axis (UP in Three.js)
-                            // Flux tubes are 3D curves: they cross the equatorial plane (y≈0) near the
-                            // moon's longitude, but curve up/down following magnetic field lines to the poles
-                            for (const p of lineData) {
-                                positions.push(p[0], p[1], p[2]);
-                            }
-                            
-                            // CRITICAL FIX: Different flux tubes have different numbers of points!
-                            // Line2 geometry doesn't handle size changes well with setPositions()
-                            // We must dispose and recreate the geometry when point count changes
-                            const expectedLength = positions.length;
-                            const currentLength = ftData.lastPositions ? ftData.lastPositions.length : 0;
-                            
-                            if (currentLength !== expectedLength) {
-                                // Dispose old geometry
-                                if (fluxTube.geometry) {
-                                    fluxTube.geometry.dispose();
-                                }
-                                
-                                // Create new geometry with correct size
-                                const newGeometry = new LineGeometry();
-                                newGeometry.setPositions(positions);
-                                fluxTube.geometry = newGeometry;
-                                
-                                if (DEBUG_FLUX_TUBES) {
-                                    console.log(`[updateFluxTubes] Moon ${moonIndex}: Recreated geometry (${currentLength} -> ${expectedLength} positions)`);
-                                }
-                            } else {
-                                // Same size - can safely update in place
-                                fluxTube.geometry.setPositions(positions);
-                            }
-                            
-                            fluxTube.computeLineDistances();
-                            fluxTube.visible = true;
-                            ftData.lastPositions = positions;
-                            
-                            if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Updated with ${lineData.length} points ✓`);
+                        fluxTube.computeLineDistances();
+                        fluxTube.visible = true;
+                        ftData.lastPositions = positions;
+                        
+                        if (DEBUG_FLUX_TUBES) console.log(`[updateFluxTubes] Moon ${moonIndex}: Interpolated between ${lonIndex0} and ${lonIndex1} (t=${interpFactor.toFixed(3)}) ✓`);
+                    } else if (lineData0 && lineData0.length >= 5) {
+                        // Fallback to single sample if second sample not available
+                        const positions = [];
+                        for (const p of lineData0) {
+                            positions.push(p[0], p[1], p[2]);
+                        }
+                        
+                        const expectedLength = positions.length;
+                        const currentLength = ftData.lastPositions ? ftData.lastPositions.length : 0;
+                        if (currentLength !== expectedLength) {
+                            if (fluxTube.geometry) fluxTube.geometry.dispose();
+                            const newGeometry = new LineGeometry();
+                            newGeometry.setPositions(positions);
+                            fluxTube.geometry = newGeometry;
                         } else {
-                            console.error(`[updateFluxTubes] Moon ${moonIndex}: No valid data found even after wide search!`);
-                            // This should NEVER happen since we have 720/720 valid tubes
-                            // But if it does, keep showing last valid geometry
-                            if (ftData.lastPositions) {
-                                fluxTube.visible = true;  // Keep showing last valid tube
-                                if (DEBUG_FLUX_TUBES) console.warn(`[updateFluxTubes] Moon ${moonIndex}: Keeping previous geometry visible`);
-                            } else {
-                                fluxTube.visible = false;
-                            }
+                            fluxTube.geometry.setPositions(positions);
+                        }
+                        fluxTube.computeLineDistances();
+                        fluxTube.visible = true;
+                        ftData.lastPositions = positions;
+                    } else {
+                        console.error(`[updateFluxTubes] Moon ${moonIndex}: No valid data found!`);
+                        if (ftData.lastPositions) {
+                            fluxTube.visible = true;
+                        } else {
+                            fluxTube.visible = false;
                         }
                     }
                 }
@@ -1496,29 +1653,30 @@
                         // Color variation
                         let r_col, g, b;
                         if (currentPlanet === 'saturn') {
+                            // Red-orange aurora for Saturn
                             const colorType = Math.random();
-                            if (colorType < 0.5) {
-                                r_col = 1.0; g = 0.1 + Math.random() * 0.2; b = 0.2 + Math.random() * 0.3;
-                            } else if (colorType < 0.8) {
-                                r_col = 1.0; g = 0.2 + Math.random() * 0.3; b = 0.4 + Math.random() * 0.3;
+                            if (colorType < 0.6) {
+                                r_col = 1.0; g = 0.3 + Math.random() * 0.3; b = 0.1 + Math.random() * 0.2;
                             } else {
-                                r_col = 0.8 + Math.random() * 0.2; g = 0.1; b = 0.5 + Math.random() * 0.4;
+                                r_col = 1.0; g = 0.5 + Math.random() * 0.3; b = 0.2 + Math.random() * 0.2;
                             }
                         } else if (currentPlanet === 'jupiter') {
+                            // Red-orange aurora for Jupiter
                             const colorType = Math.random();
                             if (colorType < 0.6) {
-                                r_col = 0.4 + Math.random() * 0.2; g = 0.2; b = 0.8 + Math.random() * 0.2;
+                                r_col = 1.0; g = 0.3 + Math.random() * 0.2; b = 0.1;
                             } else {
-                                r_col = 0.6 + Math.random() * 0.2; g = 0.1; b = 0.9;
+                                r_col = 1.0; g = 0.5 + Math.random() * 0.3; b = 0.2 + Math.random() * 0.2;
                             }
                         } else {
+                            // Green-purple aurora for Earth
                             const colorType = Math.random();
                             if (colorType < 0.6) {
-                                r_col = 0.2; g = 0.8 + Math.random() * 0.2; b = 0.3 + Math.random() * 0.2;
+                                r_col = 0.1 + Math.random() * 0.2; g = 0.8 + Math.random() * 0.2; b = 0.3 + Math.random() * 0.3;
                             } else if (colorType < 0.85) {
-                                r_col = 0.1; g = 0.6 + Math.random() * 0.2; b = 0.8 + Math.random() * 0.2;
+                                r_col = 0.3 + Math.random() * 0.2; g = 0.4 + Math.random() * 0.2; b = 0.8 + Math.random() * 0.2;
                             } else {
-                                r_col = 0.5 + Math.random() * 0.3; g = 0.2; b = 0.1;
+                                r_col = 0.5 + Math.random() * 0.3; g = 0.6 + Math.random() * 0.2; b = 0.9;
                             }
                         }
                         colors.push(r_col, g, b);
@@ -1581,7 +1739,7 @@
                 }
             }
         }
-        
+
         async function loadPlanet(planetKey) {
             const loader = document.getElementById('loading');
             const loadingText = document.getElementById('loading-text');
@@ -1611,26 +1769,33 @@
                 createFluxTubes(planetData);
                 createAurora(planetData);
                 
+                // Create plasma torus for Saturn (Enceladus) or Jupiter (Io)
+                if (planetKey === 'saturn') {
+                    createEnceladusERing();
+                } else if (planetKey === 'jupiter') {
+                    createIoTorus(planetData);
+                }
+                
                 // Update UI
                 document.getElementById('planet-title').textContent = `${planetData.planet} Magnetic Field`;
                 document.getElementById('model-info').textContent = PLANET_CONFIGS[planetKey].modelInfo;
                 
                 // Show/hide controls based on planet
                 document.getElementById('rings-group').style.display = planetKey === 'saturn' ? 'flex' : 'none';
-                document.getElementById('moon-group').style.display = planetData.moons?.length > 0 ? 'flex' : 'none';
-                document.getElementById('flux-tube-group').style.display = planetData.moons?.length > 0 ? 'flex' : 'none';
-                document.getElementById('scale-note').style.display = planetData.moons?.length > 0 ? 'block' : 'none';
                 
-                // Show aurora toggle for Earth, Jupiter, Saturn
-                const hasAurora = ['earth', 'jupiter', 'saturn'].includes(planetKey);
-                document.getElementById('aurora-group').style.display = hasAurora ? 'flex' : 'none';
-                document.getElementById('show-aurora').checked = showAurora;
-                
-                if (planetData.moons?.length > 0) {
-                    const moonNames = planetData.moons.map(m => m.name).join('/');
-                    document.getElementById('moon-label').textContent = `Show ${moonNames}`;
-                    document.getElementById('flux-tube-label').textContent = `Show ${moonNames} Flux Tubes`;
+                // Show torus toggle for Saturn and Jupiter
+                const hasTorus = ['saturn', 'jupiter'].includes(planetKey);
+                document.getElementById('torus-group').style.display = hasTorus ? 'flex' : 'none';
+                document.getElementById('show-torus').checked = showTorus;
+                if (hasTorus) {
+                    const torusName = planetKey === 'saturn' ? 'E-ring' : 'Io Torus';
+                    document.getElementById('torus-label').textContent = `Show ${torusName}`;
                 }
+                
+                // Show flux tube toggle for planets with moons
+                const hasFluxTubes = ['jupiter', 'saturn', 'uranus', 'neptune'].includes(planetKey);
+                document.getElementById('flux-tube-group').style.display = hasFluxTubes ? 'flex' : 'none';
+                document.getElementById('show-flux-tubes').checked = showFluxTube;
                 
                 // Update axial tilt label with planet's tilt value (IAU convention)
                 const axialTilt = planetData.axial_tilt || 0;
@@ -1642,10 +1807,6 @@
                 
                 // Update dropdown to show current planet
                 document.getElementById('planet-dropdown').value = planetKey;
-                
-                const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1] || 20;
-                camera.position.set(maxL * 1.2, maxL * 0.7, maxL * 1.2);
-                controls.update();
                 
                 loader.style.display = 'none';
                 document.getElementById('controls').style.display = 'block';
@@ -1696,19 +1857,7 @@
             if (ringsMesh) ringsMesh.visible = e.target.checked;
         });
         
-        document.getElementById('show-moon').addEventListener('change', (e) => {
-            moonMeshes.forEach(moon => moon.visible = e.target.checked);
-        });
-        
-        document.getElementById('show-flux-tube').addEventListener('change', (e) => {
-            showFluxTube = e.target.checked;
-            updateFluxTubes();
-        });
-        
-        document.getElementById('show-aurora').addEventListener('change', (e) => {
-            showAurora = e.target.checked;
-            updateAurora();
-        });
+
         
         document.getElementById('auto-rotate').addEventListener('change', (e) => {
             autoRotate = e.target.checked;
@@ -1720,11 +1869,18 @@
             applyAxialTilt();
         });
         
-        document.getElementById('show-grid').addEventListener('change', (e) => {
-            showGrid = e.target.checked;
-            if (planetGrid) {
-                planetGrid.visible = showGrid;
+        document.getElementById('show-torus').addEventListener('change', (e) => {
+            showTorus = e.target.checked;
+            if (plasmaTorus) {
+                plasmaTorus.visible = showTorus;
             }
+        });
+        
+        document.getElementById('show-flux-tubes').addEventListener('change', (e) => {
+            showFluxTube = e.target.checked;
+            fluxTubeLines.forEach(ft => {
+                if (ft) ft.visible = showFluxTube;
+            });
         });
         
         document.getElementById('speed-slider').addEventListener('input', (e) => {
@@ -1773,6 +1929,7 @@
                 if (northPoleArrow) northPoleArrow.rotation.y = planetRotation;
                 if (planetGrid) planetGrid.rotation.y = planetRotation;
                 if (auroraParticles) auroraParticles.rotation.y = planetRotation;
+                if (plasmaTorus) plasmaTorus.rotation.y = planetRotation;
                 
                 fieldLineGroups.forEach(group => {
                     group.rotation.y = planetRotation;
