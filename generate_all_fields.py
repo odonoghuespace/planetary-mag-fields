@@ -378,8 +378,10 @@ def generate_field_lines_for_planet(planet_key):
         print(f"    L = {orbit_r:.3f}...", end=' ', flush=True)
         lines = []
         
-        for i in range(720):  # 0.5 degree steps for smooth coverage
-            phi = 2 * np.pi * i / 720
+        # Use 360 samples (1 degree steps) - still smooth but halves file size
+        num_flux_samples = 360
+        for i in range(num_flux_samples):
+            phi = 2 * np.pi * i / num_flux_samples
             # MOON FLUX TUBES: Start in ROTATION equatorial plane where moons actually orbit
             # Use -sin to match Three.js moon position: z = -sin(angle)
             start_x = orbit_r * np.cos(phi)
@@ -388,20 +390,23 @@ def generate_field_lines_for_planet(planet_key):
             
             start_pos = np.array([start_x, start_y, start_z])
             
-            # Use very small step size and many steps to ensure we always reach the surface
-            # Adaptive stepping will increase step size in weak field regions automatically
+            # Use moderate step size for good accuracy without excessive points
             points = trace_field_line_bidirectional(
                 start_pos.tolist(),
                 get_B,
-                ds=0.005,  # Very small initial step for accuracy near moon
-                max_steps=500000,  # MANY steps to ensure we reach surface even in weak fields
+                ds=0.02,  # Reasonable step for visual quality
+                max_steps=50000,  # Sufficient for reaching surface
                 max_r=500  # 500 planetary radii to ensure full coverage
             )
             
             if len(points) > 10:
-                # Take full resolution for smoother lines
-                threejs_points = [[p[0], p[2], p[1]] for p in points]
-                threejs_points = [[round(c, 2) for c in p] for p in threejs_points]  # 2 decimal places to reduce file size
+                # Subsample to reduce file size - keep every 3rd point
+                subsampled = points[::3]
+                # Ensure we keep the endpoints
+                if points[-1] != subsampled[-1]:
+                    subsampled.append(points[-1])
+                threejs_points = [[p[0], p[2], p[1]] for p in subsampled]
+                threejs_points = [[round(c, 1) for c in p] for p in threejs_points]  # 1 decimal place to reduce file size
                 lines.append(threejs_points)
             else:
                 # If tracing failed, add empty placeholder to maintain indexing
