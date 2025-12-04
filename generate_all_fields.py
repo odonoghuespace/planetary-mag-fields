@@ -43,6 +43,7 @@ PLANETS = {
         'oblateness': 0.99665,  # polar/equatorial ratio
         'rotation_period_hours': 23.9345,
         'axial_tilt': 23.44,  # Earth's obliquity
+        'magnetic_tilt': 11.5,  # IGRF dipole tilt from rotation axis (degrees)
         'l_shells': [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
                      8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
@@ -58,6 +59,7 @@ PLANETS = {
         'oblateness': 0.93513,
         'rotation_period_hours': 9.925,
         'axial_tilt': 3.13,  # Jupiter is nearly upright
+        'magnetic_tilt': 10.31,  # JRM33 dipole tilt from rotation axis (degrees)
         'l_shells': [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0,
                      2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0,
                      8.0, 9.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0,

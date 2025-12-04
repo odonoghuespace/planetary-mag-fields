@@ -148,6 +148,36 @@
             backdrop-filter: blur(10px);
         }
         #toggle-controls:hover { background: #333; border-color: #666; color: #fff; }
+        
+        /* Center on moon panel */
+        #center-on-panel {
+            position: fixed;
+            bottom: 15px;
+            right: 15px;
+            background: rgba(20, 20, 30, 0.9);
+            padding: 10px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            display: none;
+        }
+        #center-on-panel label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 0.8em;
+            color: #aaa;
+        }
+        #center-on-panel select {
+            padding: 6px 10px;
+            font-size: 0.9em;
+            background: #333;
+            color: #f0d890;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            min-width: 120px;
+        }
+        #center-on-panel select:hover { border-color: #777; }
     </style>
 </head>
 <body>
@@ -176,6 +206,21 @@
             <div class="slider-container">
                 <input type="range" id="l-slider" min="0" max="27" value="10" step="1">
                 <span class="value-display" id="l-value">6.0</span>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <div class="checkbox-group">
+                <input type="checkbox" id="multi-lshell">
+                <label for="multi-lshell">Multi L-Shell</label>
+            </div>
+            <div id="multi-lshell-options" style="display: none; margin-top: 8px;">
+                <select id="multi-lshell-count" style="width: 100%; padding: 5px; border-radius: 4px; background: #333; color: white; border: 1px solid #555;">
+                    <option value="3">3 shells</option>
+                    <option value="6">6 shells</option>
+                    <option value="12">12 shells</option>
+                    <option value="24">24 shells</option>
+                </select>
             </div>
         </div>
         
@@ -234,6 +279,13 @@
     <div id="info">Drag to rotate | Scroll to zoom</div>
     <div id="scale-note">moons not to scale</div>
     
+    <div id="center-on-panel">
+        <label>Center on:</label>
+        <select id="center-on-select">
+            <option value="planet">Planet</option>
+        </select>
+    </div>
+    
     <script type="importmap">
     {
         "imports": {
@@ -287,11 +339,11 @@
         scene.add(fillLight);
         
         // Flux tube colors for different moons per planet
-        // Jupiter: Io=yellow; Saturn: Enceladus=pale blue; Uranus: Miranda/Ariel=purple/cyan
+        // Jupiter: Io=yellow; Saturn: Enceladus=pale blue; Uranus: Miranda/Ariel
         const PLANET_FLUX_TUBE_COLORS = {
             jupiter: [0xffff00],           // Io = yellow
             saturn: [0x88ccff],            // Enceladus = pale blue
-            uranus: [0x8833ff, 0x33ffff],  // Miranda = purple, Ariel = cyan
+            uranus: [0xff44ff, 0x4488ff],  // Miranda = magenta, Ariel = blue
             neptune: [0x33ff88]            // Triton = green
         };
         const FLUX_TUBE_COLORS = [0xffff00, 0xff8833, 0x8833ff, 0x33ffff];  // fallback
@@ -352,6 +404,8 @@
         let showAurora = true;  // Always on
         let showGrid = true;    // Always on
         let showTorus = false;
+        let multiLShellMode = false;  // Multi L-shell display mode
+        let multiLShellCount = 3;     // Number of shells in multi mode
         let currentLongitudes = 8;
         let currentThickness = 2;
         let planetRotation = 0;
@@ -1094,6 +1148,13 @@
         }
         
         function updateVisibleFieldLines(targetL) {
+            if (multiLShellMode) {
+                // Multi L-shell mode: show evenly spaced shells across the range
+                updateMultiLShellDisplay();
+                return;
+            }
+            
+            // Single L-shell mode: find closest L to target
             let closestL = null;
             let closestDist = Infinity;
             
@@ -1108,6 +1169,43 @@
             fieldLineGroups.forEach((group, L) => {
                 group.visible = (L === closestL);
             });
+        }
+        
+        function updateMultiLShellDisplay() {
+            // Get the range of available L shells
+            if (L_SHELLS_LOADED.length === 0) return;
+            
+            const minL = L_SHELLS_LOADED[0];
+            const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1];
+            const range = maxL - minL;
+            
+            // Calculate which L values to show (evenly spaced)
+            const shellsToShow = new Set();
+            for (let i = 0; i < multiLShellCount; i++) {
+                // Evenly space from min to max (inclusive of both ends)
+                const targetL = minL + (range * i) / (multiLShellCount - 1);
+                
+                // Find closest available L shell
+                let closestL = null;
+                let closestDist = Infinity;
+                L_SHELLS_LOADED.forEach(L => {
+                    const dist = Math.abs(L - targetL);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closestL = L;
+                    }
+                });
+                if (closestL !== null) {
+                    shellsToShow.add(closestL);
+                }
+            }
+            
+            // Update visibility
+            fieldLineGroups.forEach((group, L) => {
+                group.visible = shellsToShow.has(L);
+            });
+            
+            console.log(`[Multi L-Shell] Showing ${shellsToShow.size} shells:`, Array.from(shellsToShow).sort((a,b) => a-b));
         }
         
         // Store flux tube data for each moon - using dedicated high-res moon_flux_tubes data
@@ -1318,7 +1416,13 @@
                 // Moon orbit: x = r*cos(angle), z = -r*sin(angle)
                 // Therefore: atan2(z, x) = atan2(-sin, cos) = -angle
                 // We want positive angle: longitude = -atan2(z, x) = atan2(-z, x)
-                let moonLongitude = Math.atan2(-mz, mx);
+                let moonLongitudeInertial = Math.atan2(-mz, mx);
+                
+                // CRITICAL FIX: Convert from inertial frame to rotating (planet-fixed) frame
+                // The flux tubes are calculated in the rotating frame where the planet is stationary
+                // We need to find which flux tube the moon is currently passing through
+                // Moon's longitude in rotating frame = inertial longitude - planet rotation
+                let moonLongitude = moonLongitudeInertial - planetRotation;
                 
                 // Normalize to 0 to 2π
                 moonLongitude = ((moonLongitude % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
@@ -1797,6 +1901,24 @@
                 document.getElementById('flux-tube-group').style.display = hasFluxTubes ? 'flex' : 'none';
                 document.getElementById('show-flux-tubes').checked = showFluxTube;
                 
+                // Update "Center on" panel for planets with moons
+                const hasMoons = planetData.moons && planetData.moons.length > 0;
+                const centerPanel = document.getElementById('center-on-panel');
+                const centerSelect = document.getElementById('center-on-select');
+                centerPanel.style.display = hasMoons ? 'block' : 'none';
+                
+                if (hasMoons) {
+                    // Clear and repopulate the dropdown
+                    centerSelect.innerHTML = '<option value="planet">Planet</option>';
+                    planetData.moons.forEach((moon, idx) => {
+                        const option = document.createElement('option');
+                        option.value = idx.toString();
+                        option.textContent = moon.name;
+                        centerSelect.appendChild(option);
+                    });
+                    centerSelect.value = 'planet';  // Reset to planet view
+                }
+                
                 // Update axial tilt label with planet's tilt value (IAU convention)
                 const axialTilt = planetData.axial_tilt || 0;
                 document.getElementById('tilt-label').textContent = `Show Axial Tilt (IAU; ${axialTilt.toFixed(1)}°)`;
@@ -1883,6 +2005,62 @@
             });
         });
         
+        // Center on moon/planet
+        let centerTarget = 'planet';  // Track what we're centered on
+        document.getElementById('center-on-select').addEventListener('change', (e) => {
+            centerTarget = e.target.value;
+            
+            if (centerTarget === 'planet') {
+                // Center on planet (origin)
+                controls.target.set(0, 0, 0);
+                const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1] || 20;
+                camera.position.set(maxL * 0.9, maxL * 0.5, maxL * 0.9);
+            } else {
+                // Center on a moon
+                const moonIdx = parseInt(centerTarget);
+                if (moonMeshes[moonIdx]) {
+                    const moon = moonMeshes[moonIdx];
+                    const worldPos = new THREE.Vector3();
+                    moon.getWorldPosition(worldPos);
+                    controls.target.copy(worldPos);
+                    
+                    // Position camera close to the moon
+                    const moonRadius = moon.geometry?.parameters?.radius || 0.3;
+                    const viewDist = moonRadius * 15;
+                    camera.position.set(
+                        worldPos.x + viewDist,
+                        worldPos.y + viewDist * 0.5,
+                        worldPos.z + viewDist
+                    );
+                }
+            }
+            controls.update();
+        });
+        
+        // Multi L-shell mode controls
+        document.getElementById('multi-lshell').addEventListener('change', (e) => {
+            multiLShellMode = e.target.checked;
+            document.getElementById('multi-lshell-options').style.display = multiLShellMode ? 'block' : 'none';
+            document.getElementById('l-slider').disabled = multiLShellMode;
+            document.getElementById('l-slider').style.opacity = multiLShellMode ? '0.5' : '1';
+            
+            if (multiLShellMode) {
+                updateMultiLShellDisplay();
+            } else {
+                // Revert to single L-shell mode
+                const slider = document.getElementById('l-slider');
+                const L = L_SHELLS_LOADED[parseInt(slider.value)] || L_SHELLS_LOADED[0];
+                updateVisibleFieldLines(L);
+            }
+        });
+        
+        document.getElementById('multi-lshell-count').addEventListener('change', (e) => {
+            multiLShellCount = parseInt(e.target.value);
+            if (multiLShellMode) {
+                updateMultiLShellDisplay();
+            }
+        });
+        
         document.getElementById('speed-slider').addEventListener('input', (e) => {
             rotationSpeedMultiplier = parseFloat(e.target.value);
             document.getElementById('speed-value').textContent = rotationSpeedMultiplier.toFixed(1) + 'x';
@@ -1935,8 +2113,10 @@
                     group.rotation.y = planetRotation;
                 });
                 
-                // DON'T rotate flux tube lines - they're updated via geometry changes to track moons
-                // fluxTubeLines are in tiltGroup and their geometry is set to match moon position
+                // Rotate flux tube lines with the planet - they're in the rotating frame
+                fluxTubeLines.forEach(ft => {
+                    if (ft) ft.rotation.y = planetRotation;
+                });
                 
                 // Animate moons at their correct orbital speeds
                 // Planet rotates at planetSpeed rad/frame
@@ -1960,6 +2140,23 @@
                 
                 // Update flux tubes to follow moons
                 updateFluxTubes();
+                
+                // If centered on a moon, update camera target to follow it
+                if (centerTarget !== 'planet') {
+                    const moonIdx = parseInt(centerTarget);
+                    if (moonMeshes[moonIdx]) {
+                        const moon = moonMeshes[moonIdx];
+                        const worldPos = new THREE.Vector3();
+                        moon.getWorldPosition(worldPos);
+                        
+                        // Calculate offset from old target to camera
+                        const offset = camera.position.clone().sub(controls.target);
+                        
+                        // Update target and camera position to follow moon
+                        controls.target.copy(worldPos);
+                        camera.position.copy(worldPos).add(offset);
+                    }
+                }
             }
             
             controls.update();
