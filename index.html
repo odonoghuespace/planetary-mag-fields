@@ -339,11 +339,11 @@
         controls.maxDistance = 200;
         controls.zoomSpeed = 2.0;
         
-        // Lighting: ambient=0.27, sun=1.2 → night/day ≈ 18% (night-side dim, day-side bright)
+        // Lighting: ambient=0.2, sun=2.2 → night/day ≈ 18% (night-side dim, day-side bright)
         // Uniform mode boosts ambient to ~1.4 and kills directional light.
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.27);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
         scene.add(ambientLight);
-        const sunLight = new THREE.DirectionalLight(0xfff8e0, 1.2);
+        const sunLight = new THREE.DirectionalLight(0xfff8e0, 2.2);
         sunLight.position.set(80, 0, 80);
         scene.add(sunLight);
         
