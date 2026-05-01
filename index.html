@@ -737,8 +737,8 @@
                         // Shift from deep blue toward Uranus-like cyan-teal:
                         // boost R (+warmth), boost G (+cyan), cut B (-saturated blue)
                         d[i]   = Math.min(255, d[i]   * 1.45 + 18);  // R up
-                        d[i+1] = Math.min(255, d[i+1] * 1.25 + 12);  // G up
-                        d[i+2] = Math.min(255, d[i+2] * 0.68);       // B down
+                        d[i+1] = Math.min(255, d[i+1] * 1.10 + 6);   // G slightly up (was 1.25+12)
+                        d[i+2] = Math.min(255, d[i+2] * 0.82);       // B less cut (was 0.68)
                     }
                     ctx2d.putImageData(id, 0, 0);
                     const filteredTex = new THREE.CanvasTexture(cvs);
