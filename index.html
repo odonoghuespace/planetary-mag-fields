@@ -369,25 +369,30 @@
                 name: 'Jupiter',
                 fieldColor: 0xffaa44,
                 defaultL: 30,
-                modelInfo: 'JRM33 + Con2020 model'
+                modelInfo: 'JRM33 + Con2020 model',
+                useTexture: 'texture_jupiter.jpg'
             },
             saturn: {
                 name: 'Saturn',
                 fieldColor: 0xaa88ff,
                 defaultL: 20,
-                modelInfo: 'Cassini 11 model'
+                modelInfo: 'Cassini 11 model',
+                useTexture: 'texture_saturn.jpg'
             },
             uranus: {
                 name: 'Uranus',
                 fieldColor: 0x44ffaa,
                 defaultL: 10,
-                modelInfo: 'GSFC Q3 model'
+                modelInfo: 'GSFC Q3 model',
+                useTexture: 'texture_uranus.jpg'
             },
             neptune: {
                 name: 'Neptune',
                 fieldColor: 0x4488ff,
                 defaultL: 10,
-                modelInfo: 'GSFC O8 model'
+                modelInfo: 'GSFC O8 model',
+                useTexture: 'texture_neptune_raw.jpg',
+                filterTexture: true  // Apply Neptune colour correction
             }
         };
         
@@ -429,18 +434,18 @@
 
         // Sun
         let sunMesh = null;
-        const SUN_DISTANCE = 80;
+        const SUN_DISTANCE = 200;
         let sunAngleDeg = 45;
         let sunlightOn = true;
 
         function applySunlightMode() {
             if (sunlightOn) {
-                ambientLight.intensity = 0.27;
-                sunLight.intensity = 1.2;
+                ambientLight.intensity = 0.12;
+                sunLight.intensity = 3.0;
                 if (sunMesh) sunMesh.visible = true;
             } else {
                 // Uniform: boost ambient to rough dayside equivalent, kill directional
-                ambientLight.intensity = 1.4;
+                ambientLight.intensity = 1.5;
                 sunLight.intensity = 0.0;
                 if (sunMesh) sunMesh.visible = false;
             }
@@ -448,19 +453,19 @@
 
         function createSun() {
             const group = new THREE.Group();
-            // Core
-            const coreGeo = new THREE.SphereGeometry(1.2, 16, 16);
+            // Core (50% smaller: 0.6 vs old 1.2)
+            const coreGeo = new THREE.SphereGeometry(0.6, 16, 16);
             const coreMat = new THREE.MeshBasicMaterial({ color: 0xfffce0 });
             group.add(new THREE.Mesh(coreGeo, coreMat));
-            // Inner glow
-            const glow1Geo = new THREE.SphereGeometry(2.2, 16, 16);
+            // Inner glow (was 2.2 → 1.1)
+            const glow1Geo = new THREE.SphereGeometry(1.1, 16, 16);
             const glow1Mat = new THREE.MeshBasicMaterial({
                 color: 0xffee88, transparent: true, opacity: 0.25,
                 blending: THREE.AdditiveBlending, depthWrite: false
             });
             group.add(new THREE.Mesh(glow1Geo, glow1Mat));
-            // Outer glow
-            const glow2Geo = new THREE.SphereGeometry(4.0, 16, 16);
+            // Outer glow (was 4.0 → 2.0)
+            const glow2Geo = new THREE.SphereGeometry(2.0, 16, 16);
             const glow2Mat = new THREE.MeshBasicMaterial({
                 color: 0xffcc44, transparent: true, opacity: 0.08,
                 blending: THREE.AdditiveBlending, depthWrite: false
@@ -714,23 +719,50 @@
             const config = PLANET_CONFIGS[currentPlanet];
             let material;
             
-            if (config.useTexture) {
-                // Load real texture for Earth
+            if (config.useTexture && config.filterTexture) {
+                // Neptune: load texture then apply cyan-shift via canvas
+                // (many Neptune images are over-saturated blue from Voyager 2 processing;
+                //  JWST/modern views show it is much closer to Uranus in teal/cyan colour)
+                const rawMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.0 });
+                material = rawMat;
+                const img = new Image();
+                img.onload = () => {
+                    const cvs = document.createElement('canvas');
+                    cvs.width = img.width; cvs.height = img.height;
+                    const ctx2d = cvs.getContext('2d');
+                    ctx2d.drawImage(img, 0, 0);
+                    const id = ctx2d.getImageData(0, 0, cvs.width, cvs.height);
+                    const d = id.data;
+                    for (let i = 0; i < d.length; i += 4) {
+                        // Shift from deep blue toward Uranus-like cyan-teal:
+                        // boost R (+warmth), boost G (+cyan), cut B (-saturated blue)
+                        d[i]   = Math.min(255, d[i]   * 1.45 + 18);  // R up
+                        d[i+1] = Math.min(255, d[i+1] * 1.25 + 12);  // G up
+                        d[i+2] = Math.min(255, d[i+2] * 0.68);       // B down
+                    }
+                    ctx2d.putImageData(id, 0, 0);
+                    const filteredTex = new THREE.CanvasTexture(cvs);
+                    filteredTex.wrapS = THREE.RepeatWrapping;
+                    filteredTex.offset.x = 0.5;
+                    rawMat.map = filteredTex;
+                    rawMat.needsUpdate = true;
+                };
+                img.src = config.useTexture;
+            } else if (config.useTexture) {
                 const texture = textureLoader.load(config.useTexture);
-                // Rotate texture 180° to align 0° longitude correctly
                 texture.offset.x = 0.5;
                 texture.wrapS = THREE.RepeatWrapping;
                 material = new THREE.MeshStandardMaterial({
                     map: texture,
-                    roughness: 0.8,
-                    metalness: 0.1
+                    roughness: 0.55,
+                    metalness: 0.0
                 });
             } else {
                 const texture = createPlanetTexture(currentPlanet);
                 material = new THREE.MeshStandardMaterial({
                     map: texture,
-                    roughness: 0.8,
-                    metalness: 0.1
+                    roughness: 0.55,
+                    metalness: 0.0
                 });
             }
             
