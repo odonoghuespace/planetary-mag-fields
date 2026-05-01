@@ -254,6 +254,10 @@
                 <input type="checkbox" id="show-tilt">
                 <label for="show-tilt" id="tilt-label">Show Axial Tilt (23.4°)</label>
             </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="show-sunlight" checked>
+                <label for="show-sunlight">Sunlight (uncheck = uniform)</label>
+            </div>
             <div class="checkbox-group" id="torus-group" style="display: none;">
                 <input type="checkbox" id="show-torus">
                 <label for="show-torus" id="torus-label">Show Torus</label>
@@ -335,14 +339,13 @@
         controls.maxDistance = 200;
         controls.zoomSpeed = 2.0;
         
-        // Lighting: ambient sets night-side at ~40% of day-side brightness
-        // (ambient=0.8, sun=1.2 → night/day = 0.8/2.0 = 40%)
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        // Lighting: ambient=0.27, sun=1.2 → night/day ≈ 18% (night-side dim, day-side bright)
+        // Uniform mode boosts ambient to ~1.4 and kills directional light.
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.27);
         scene.add(ambientLight);
-        const sunLight = new THREE.DirectionalLight(0xfff8e0, 1.2);  // Warm sunlight
-        sunLight.position.set(80, 0, 80);  // Controlled by orbital position slider
+        const sunLight = new THREE.DirectionalLight(0xfff8e0, 1.2);
+        sunLight.position.set(80, 0, 80);
         scene.add(sunLight);
-        // No back-fill light — night side stays at true ambient only
         
         // Flux tube colors for different moons per planet
         // Jupiter: Io=yellow; Saturn: Enceladus=pale blue; Uranus: Miranda/Ariel
@@ -428,6 +431,20 @@
         let sunMesh = null;
         const SUN_DISTANCE = 80;
         let sunAngleDeg = 45;
+        let sunlightOn = true;
+
+        function applySunlightMode() {
+            if (sunlightOn) {
+                ambientLight.intensity = 0.27;
+                sunLight.intensity = 1.2;
+                if (sunMesh) sunMesh.visible = true;
+            } else {
+                // Uniform: boost ambient to rough dayside equivalent, kill directional
+                ambientLight.intensity = 1.4;
+                sunLight.intensity = 0.0;
+                if (sunMesh) sunMesh.visible = false;
+            }
+        }
 
         function createSun() {
             const group = new THREE.Group();
@@ -457,9 +474,25 @@
             sunAngleDeg = angleDeg;
             const rad = THREE.MathUtils.degToRad(angleDeg);
             const sx = SUN_DISTANCE * Math.cos(rad);
-            const sz = SUN_DISTANCE * Math.sin(rad);
-            if (sunMesh) sunMesh.position.set(sx, 0, sz);
-            sunLight.position.set(sx, 0, sz);
+            const sz_ecl = SUN_DISTANCE * Math.sin(rad);
+
+            let sy, sz;
+            if (!showAxialTilt && planetData && planetData.axial_tilt) {
+                // Planet is displayed upright (tiltGroup.rotation.x = 0).
+                // To keep the sub-solar point identical to tilt-ON mode,
+                // we rotate the Sun position by the axial tilt around x:
+                //   body_y = sz_ecl * sin(tilt),  body_z = sz_ecl * cos(tilt)
+                const tiltRad = THREE.MathUtils.degToRad(planetData.axial_tilt);
+                sy = sz_ecl * Math.sin(tiltRad);
+                sz = sz_ecl * Math.cos(tiltRad);
+            } else {
+                // Planet is tilted in scene (or no tilt data yet) — Sun stays in ecliptic
+                sy = 0;
+                sz = sz_ecl;
+            }
+
+            if (sunMesh) sunMesh.position.set(sx, sy, sz);
+            sunLight.position.set(sx, sy, sz);
         }
 
         // Planet texture creation
@@ -2033,6 +2066,13 @@
         document.getElementById('show-tilt').addEventListener('change', (e) => {
             showAxialTilt = e.target.checked;
             applyAxialTilt();
+            // Reposition Sun so sub-solar latitude is preserved across tilt toggle
+            updateSunPosition(sunAngleDeg);
+        });
+
+        document.getElementById('show-sunlight').addEventListener('change', (e) => {
+            sunlightOn = e.target.checked;
+            applySunlightMode();
         });
         
         document.getElementById('show-torus').addEventListener('change', (e) => {
@@ -2216,6 +2256,7 @@
         
         // Start
         createSun();
+        applySunlightMode();
         updateSunPosition(45);
         loadPlanet('earth');
         animate();
