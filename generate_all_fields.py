@@ -17,7 +17,7 @@ import json
 import sys
 import os
 
-from planetary_magfield_simple import get_field
+from internal_field_models import get_field
 
 # Import Con2020 for Jupiter's external field
 import con2020

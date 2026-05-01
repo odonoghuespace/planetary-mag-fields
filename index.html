@@ -272,6 +272,13 @@
             </div>
         </div>
         
+        <div class="control-group">
+            <label>Orbital Position (Sun) &nbsp;<span class="value-display" id="sun-angle-value" style="display:inline-block;">45°</span></label>
+            <div class="slider-container">
+                <input type="range" id="sun-angle-slider" min="0" max="360" value="45" step="1">
+            </div>
+        </div>
+
         <div id="model-info"></div>
     </div>
     
@@ -328,15 +335,14 @@
         controls.maxDistance = 200;
         controls.zoomSpeed = 2.0;
         
-        // Lighting
+        // Lighting: ambient sets night-side at ~40% of day-side brightness
+        // (ambient=0.8, sun=1.2 → night/day = 0.8/2.0 = 40%)
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
-        const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        sunLight.position.set(15, 8, 15);
+        const sunLight = new THREE.DirectionalLight(0xfff8e0, 1.2);  // Warm sunlight
+        sunLight.position.set(80, 0, 80);  // Controlled by orbital position slider
         scene.add(sunLight);
-        const fillLight = new THREE.DirectionalLight(0xffffcc, 0.5);
-        fillLight.position.set(-10, -5, -10);
-        scene.add(fillLight);
+        // No back-fill light — night side stays at true ambient only
         
         // Flux tube colors for different moons per planet
         // Jupiter: Io=yellow; Saturn: Enceladus=pale blue; Uranus: Miranda/Ariel
@@ -417,7 +423,45 @@
         
         // Debug mode toggle - set to true for extensive logging
         const DEBUG_FLUX_TUBES = true;  // ENABLED for debugging
-        
+
+        // Sun
+        let sunMesh = null;
+        const SUN_DISTANCE = 80;
+        let sunAngleDeg = 45;
+
+        function createSun() {
+            const group = new THREE.Group();
+            // Core
+            const coreGeo = new THREE.SphereGeometry(1.2, 16, 16);
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0xfffce0 });
+            group.add(new THREE.Mesh(coreGeo, coreMat));
+            // Inner glow
+            const glow1Geo = new THREE.SphereGeometry(2.2, 16, 16);
+            const glow1Mat = new THREE.MeshBasicMaterial({
+                color: 0xffee88, transparent: true, opacity: 0.25,
+                blending: THREE.AdditiveBlending, depthWrite: false
+            });
+            group.add(new THREE.Mesh(glow1Geo, glow1Mat));
+            // Outer glow
+            const glow2Geo = new THREE.SphereGeometry(4.0, 16, 16);
+            const glow2Mat = new THREE.MeshBasicMaterial({
+                color: 0xffcc44, transparent: true, opacity: 0.08,
+                blending: THREE.AdditiveBlending, depthWrite: false
+            });
+            group.add(new THREE.Mesh(glow2Geo, glow2Mat));
+            sunMesh = group;
+            scene.add(sunMesh);
+        }
+
+        function updateSunPosition(angleDeg) {
+            sunAngleDeg = angleDeg;
+            const rad = THREE.MathUtils.degToRad(angleDeg);
+            const sx = SUN_DISTANCE * Math.cos(rad);
+            const sz = SUN_DISTANCE * Math.sin(rad);
+            if (sunMesh) sunMesh.position.set(sx, 0, sz);
+            sunLight.position.set(sx, 0, sz);
+        }
+
         // Planet texture creation
         function createPlanetTexture(planetKey) {
             const canvas = document.createElement('canvas');
@@ -2065,6 +2109,12 @@
             rotationSpeedMultiplier = parseFloat(e.target.value);
             document.getElementById('speed-value').textContent = rotationSpeedMultiplier.toFixed(1) + 'x';
         });
+
+        document.getElementById('sun-angle-slider').addEventListener('input', (e) => {
+            const a = parseInt(e.target.value);
+            document.getElementById('sun-angle-value').textContent = a + '°';
+            updateSunPosition(a);
+        });
         
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
@@ -2165,6 +2215,8 @@
         }
         
         // Start
+        createSun();
+        updateSunPosition(45);
         loadPlanet('earth');
         animate();
     </script>
