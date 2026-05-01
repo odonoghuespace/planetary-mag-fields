@@ -258,6 +258,10 @@
                 <input type="checkbox" id="show-sunlight" checked>
                 <label for="show-sunlight">Sunlight (uncheck = uniform)</label>
             </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="lon-colours">
+                <label for="lon-colours">Longitude colours</label>
+            </div>
             <div class="checkbox-group" id="torus-group" style="display: none;">
                 <input type="checkbox" id="show-torus">
                 <label for="show-torus" id="torus-label">Show Torus</label>
@@ -420,6 +424,7 @@
         let showTorus = false;
         let multiLShellMode = false;  // Multi L-shell display mode
         let multiLShellCount = 3;     // Number of shells in multi mode
+        let lonColours = false;        // Colour field lines by longitude instead of L-shell
         let currentLongitudes = 8;
         let currentThickness = 2;
         let planetRotation = 0;
@@ -1219,10 +1224,19 @@
                     const geometry = new LineGeometry();
                     geometry.setPositions(positions);
                     
-                    const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1] || 30;
-                    const t = Math.min((L - 1.1) / (maxL - 1.1), 1.0);
                     const color = new THREE.Color();
-                    color.setHSL(0.65 - t * 0.65, 1.0, 0.55);
+                    if (lonColours) {
+                        // Longitude-based: hue spread evenly, same across all L-shells
+                        color.setHSL(i / numLongitudes, 1.0, 0.55);
+                    } else if (multiLShellMode) {
+                        // Multi-shell mode: colour by L-shell distance (blue→red)
+                        const maxL = L_SHELLS_LOADED[L_SHELLS_LOADED.length - 1] || 30;
+                        const t = Math.min((L - 1.1) / (maxL - 1.1), 1.0);
+                        color.setHSL(0.65 - t * 0.65, 1.0, 0.55);
+                    } else {
+                        // Single L-shell: fixed planet colour, no L-shell shift
+                        color.setHex(PLANET_CONFIGS[currentPlanet]?.fieldColor || 0x44aaff);
+                    }
                     
                     const material = new LineMaterial({
                         color: color,
@@ -2160,6 +2174,9 @@
             document.getElementById('l-slider').disabled = multiLShellMode;
             document.getElementById('l-slider').style.opacity = multiLShellMode ? '0.5' : '1';
             
+            // Rebuild line colours for the mode switch
+            updateLongitudes(currentLongitudes);
+
             if (multiLShellMode) {
                 updateMultiLShellDisplay();
             } else {
@@ -2168,6 +2185,11 @@
                 const L = L_SHELLS_LOADED[parseInt(slider.value)] || L_SHELLS_LOADED[0];
                 updateVisibleFieldLines(L);
             }
+        });
+
+        document.getElementById('lon-colours').addEventListener('change', (e) => {
+            lonColours = e.target.checked;
+            updateLongitudes(currentLongitudes);
         });
         
         document.getElementById('multi-lshell-count').addEventListener('change', (e) => {
