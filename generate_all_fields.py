@@ -17,8 +17,6 @@ import json
 import sys
 import os
 
-# Add path to magnetic field library
-sys.path.append('/Users/jamesodonoghue/jupitermag_temp')
 from planetary_magfield_simple import get_field
 
 # Import Con2020 for Jupiter's external field
